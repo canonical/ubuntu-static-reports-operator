@@ -1,4 +1,4 @@
-project: manpages-charm-tests
+project: ubuntu-static-reports-charm-tests
 kill-timeout: 90m
 workers: 1
 
@@ -9,7 +9,7 @@ backends:
   lxd:
     type: adhoc
     allocate: |
-      CONTAINER_NAME="manpages-${SPREAD_SYSTEM/./-}-${RANDOM}"
+      CONTAINER_NAME="ubuntu-static-reports-${SPREAD_SYSTEM/./-}-${RANDOM}"
       DISK="${DISK:-20}"
       CPU="${CPU:-4}"
       MEM="${MEM:-8}"
@@ -71,8 +71,8 @@ suites:
 
       pushd "$SPREAD_PATH"
 
-      if [[ -f "$PWD/ubuntu-manpages_amd64.charm" ]]; then
-        chown $(id -u):$(id -g) $PWD/ubuntu-manpages_amd64.charm
+      if [[ -f "$PWD/ubuntu-static_reports_amd64.charm" ]]; then
+        chown $(id -u):$(id -g) $PWD/ubuntu-static_reports_amd64.charm
       fi
     restore-each: |
       if [[ -z "${CI:-}" ]]; then

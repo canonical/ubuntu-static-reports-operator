@@ -1377,7 +1377,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ubuntu-manpages-operator"
+name = "ubuntu-static-reports-operator"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
