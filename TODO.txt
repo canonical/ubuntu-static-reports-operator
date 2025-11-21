@@ -1,0 +1,112 @@
+This is the list of tasks for the conversion to a first static-reports
+version.
+
+Notes and references of related discussions (may have examples and links to
+get the below list done) in the google doc "Ubuntu static reports charm - running notes"
+
+0. Create local test environment
+- LV and JJ have different way, inspired by them for now we use isolation from the host
+- lxd profile for shared dev tree and some size in a VM
+  $ lxc profile show charming
+  name: charming
+  description: Allowing KVM execution for machines and sharing FS with dev tree
+  config:
+    boot.autostart: "true"
+    limits.cpu: "4"
+    limits.memory: 10GiB
+  devices:
+    root:
+      path: /
+      pool: default
+      size: 40GB
+      type: disk
+    shareddevdir:
+      path: /root/charming
+      source: /home/$youruser/work/charming
+      type: disk
+  $ lxc launch ubuntu-daily:n charming --profile default --profile charming --vm
+- use conscierge to setup juju there
+  $ lxc shell charming
+    # snap install --classic concierge
+    # concierge prepare --verbose --juju-channel=3/stable --charmcraft-channel=3.x/stable -p machine
+
+1. Create fake workloads
+Most tools we eventually want (packageset-report, permissions-report, ...) have
+run-times of 30 minutes or more, that is bad for development/iteration.
+- Create two git repos
+- Dump simple tools in each that create any static content fast
+- Have them print the current date so we can see it updated
+- This allows to fetch from those and iterate quickly
+
+2. Decide when to pull code and make it happen
+setup time (code we execute)
+- charm build time - charmcraft.yml git + nul plugin to fetch the code to app/bin
+- install time in on_install hooks
+run-time (data we need when running)
+- fetch/update this as part of the service/code that runs to be always up to
+  date, that should not be in the charm (which does install, config change, ..)
+  but instead in the executing app itself that is started by the service
+
+3. write service+timer for the two example binaries
+- write them and use short timers to test quickly
+- install them on setup
+
+4. introduce logger
+- use proper logger 8see debuginfod charm) and use it throughout for execution info
+- example: https://github.com/canonical/ubuntu-debuginfod-operator/blob/main/src/charm.py#L49C1-L49C7
+
+5. Switch apt lib to the new better dependency style
+- Apt is now pypi - see https://documentation.ubuntu.com/charmlibs/reference/charmlibs/apt/ - use that instead
+- remove old style code and charmcraft.yaml reference
+- https://charmhub.io/operator-libs-linux and https://charmhub.io/operator-libs-linux/libraries/apt shows the options in there
+Example:
+- https://github.com/canonical/git-ubuntu-operator/blob/main/pyproject.toml
+- https://github.com/canonical/git-ubuntu-operator/blob/main/uv.lock
+
+6. Update other charmcraft libs that are not yet modern
+- `charmcraft fetch-libs` will fetch it into the charm
+- yes they are local copies :-/
+
+7. knob to disable services individually
+- add know per-service to enable/disable through juju
+- make them active/inactive on config change
+- example: debuginfod knob
+
+8. simplify type handling
+- from __future__ import annotations
+- https://github.com/canonical/ubuntu-debuginfod-operator/blob/main/src/charm.py#L34
+
+9. experiment with traefik_k8s (jon) lib vs apt install nginx (suggested by others)
+- decide which one to use
+
+10. pick a test framework
+- It seems everone picks what they like most, JS: spread, LV: tox, JJ: pytest
+- spread is the native one for crafts, but also the one with most to learn/adapt for us
+- check what we actually test when we have some function and then pick the one with the least entry barrier
+
+11. write and extend the tests
+- service handling
+- status after deployment
+- if possible known good content (problem - all tools run quite long)
+
+12. switch the release to the simpler publishing workflow LV and JJ use
+- example  https://github.com/canonical/ubuntu-debuginfod-operator/blob/main/.github/workflows/publish.yaml
+
+14. create and set chamrhub token in the config of the GH project
+- Some of the things we include/call use exactly this and hence the names are predefined
+- https://github.com/canonical/ubuntu-debuginfod-operator/blob/main/.github/workflows/publish.yaml#L85C12-L86C54
+- Create the charmhub token: https://github.com/canonical/ubuntu-debuginfod-operator/blob/main/README.md#github-integration 
+- Like https://github.com/canonical/ubuntu-debuginfod-operator/settings/secrets/actions
+
+13 - pull real binaries and services
+- Switch from test setup to the real tools we want to use
+- Write services for each
+- Define paths for those to write to
+- Define different timers matching what today is in the crontab
+
+14 Rethink next steps
+ - How can eventually different things on https://ubuntu-archive-team.ubuntu.com/ come from different sources (not all from this charm)
+ - Could we have all services write into a "status" file somehow to see which ran when, successful or not and such?
+   Could be as simple as exposing systemctl status of all of them
+   Can that be on the web or does it have to be admin access
+   In case of the latter, we do not need anything as juju ... status will capture that
