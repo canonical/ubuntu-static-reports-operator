@@ -1,0 +1,50 @@
+name: ubuntu-transition-tracker
+type: charm
+title: Ubuntu Transition Tracker charm
+summary: Generate Transition reports for Ubuntu
+description: |
+  **Ubuntu Transition Tracker Operator** is a [charm](https://juju.is/charms-architecture)
+  for building transition tracker reports for Ubuntu.
+
+
+links:
+  website:
+    - https://charmhub.io/ubuntu-transition-tracker
+  issues:
+    - https://github.com/canonical/transition-tracker-operator/issues
+  source:
+    - https://github.com/canonical/transition-tracker-operator
+
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+
+parts:
+  transition-tracker-charm:
+    source: .
+    plugin: uv
+    build-packages: [git]
+    build-snaps: [astral-uv]
+    override-build: |
+      craftctl default  # Run the default build steps.
+      git describe --always > $CRAFT_PART_INSTALL/version
+
+charm-libs:
+  - lib: operator_libs_linux.apt
+    version: "0"
+  - lib: operator_libs_linux.systemd
+    version: "1"
+  - lib: traefik_k8s.ingress
+    version: "2"
+
+actions:
+  refresh:
+    description: |
+      Refresh the content of the transition tracker
+
+requires:
+  ingress:
+    interface: ingress
+    limit: 1
+    optional: true
