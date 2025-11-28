@@ -26,14 +26,12 @@ PACKAGES = [
 ]
 
 SRVDIR = Path("/srv/transitions/transition-tracker")
-GOCMD = SRVDIR / "config/" / "go"
 REPO_URL = (
     "https://git.launchpad.net/~ubuntu-transition-trackers/ubuntu-transition-tracker/+git/configs"
 )
 MIRROR_DIR = Path("/srv/mirrors")
 MIRROR_DISTS = MIRROR_DIR / "ubuntu" / "dists"
 
-LOG = Path("/var/log/transition.log")
 NGINX_SITE_CONFIG_PATH = Path("/etc/nginx/conf.d/transition.conf")
 
 
@@ -155,38 +153,10 @@ class Transition:
         """Configure the charm."""
         logger.debug("The url in use is %s", url)
 
-    def rsync_archive_indexes(self):
-        """Update the ubuntu archive indexes mirror."""
-        try:
-            with open(LOG, "a") as logfile:
-                run(
-                    [
-                        "/usr/bin/syncmirror",
-                    ],
-                    check=True,
-                    env=self.env,
-                    stdout=logfile,
-                    stderr=STDOUT,
-                    text=True,
-                )
-        except CalledProcessError as e:
-            logger.debug("Refreshing of the tracker failed: %s", e.stdout)
-            raise
-
     def refresh_report(self):
         """Refresh the tracker."""
         try:
-            with open(LOG, "a") as logfile:
-                run(
-                    [
-                        GOCMD,
-                    ],
-                    check=True,
-                    env=self.env,
-                    stdout=logfile,
-                    stderr=STDOUT,
-                    text=True,
-                )
+            systemd.service_start("ubuntu-transition-tracker.service")
         except CalledProcessError as e:
             logger.debug("Refreshing of the tracker failed: %s", e.stdout)
             raise
