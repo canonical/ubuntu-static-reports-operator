@@ -1,9 +1,0 @@
-[Unit]
-Description=Update the manpages
-
-[Service]
-Type=simple
-User=www-data
-ExecStart=/app/bin/make-manpage-repo.sh
-Environment='MANPAGES_CONFIG_FILE=/app/www/config.json'
-{{ proxy_config }}

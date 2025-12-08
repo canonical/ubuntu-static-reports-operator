@@ -2,101 +2,107 @@
 # Copyright 2025 Canonical
 # See LICENSE file for licensing details.
 
-"""Charmed Operator for manpages.ubuntu.com."""
+"""Charmed Operator for Ubuntu Transition Tracker."""
 
 import logging
+import shutil
 import socket
 from subprocess import CalledProcessError
 
 import ops
-from charms.operator_libs_linux.v0.apt import PackageError, PackageNotFoundError
+from charmlibs.apt import PackageError, PackageNotFoundError
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer as IngressRequirer
 
-from launchpad import LaunchpadClient
-from manpages import Manpages
+from transition import Transition
 
 logger = logging.getLogger(__name__)
 
-PORT = 8080
+PORT = 80
 
 
-class ManpagesCharm(ops.CharmBase):
-    """Charmed Operator for manpages.ubuntu.com."""
+class UbuntuTransitionCharm(ops.CharmBase):
+    """Charmed Operator for Ubuntu Transition Tracker."""
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
+
         self.ingress = IngressRequirer(self, port=PORT, strip_prefix=True, relation_name="ingress")
 
-        framework.observe(self.on.install, self._on_install)
-        framework.observe(self.on.start, self._on_start)
-        framework.observe(self.on.upgrade_charm, self._on_install)
-        framework.observe(self.on.update_status, self._on_update_status)
-        framework.observe(self.on.update_manpages_action, self._on_config_changed)
-        framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(self.on.start, self._on_start)
+        self.framework.observe(self.on.upgrade_charm, self._on_install)
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.on.refresh_action, self._on_refresh_report)
 
         # Ingress URL changes require updating the configuration and also regenerating sitemaps,
         # therefore we can bind events for this relation to the config_changed event.
         framework.observe(self.ingress.on.ready, self._on_config_changed)
         framework.observe(self.ingress.on.revoked, self._on_config_changed)
 
-        self._manpages = Manpages(LaunchpadClient())
+        self._transition = Transition()
 
-    def _on_install(self, event: ops.InstallEvent):
-        """Install the packages and configuration for ubuntu-manpages."""
-        self.unit.status = ops.MaintenanceStatus("Installing manpages")
+    def _on_install(self, event: ops.EventBase):
+        """Handle install, upgrade, config-changed, or ingress events."""
+        self.unit.status = ops.MaintenanceStatus("Setting up environment")
         try:
-            self._manpages.install()
-        except (CalledProcessError, PackageError, PackageNotFoundError):
+            self._transition.install()
+            self._transition.setup_systemd_units()
+        except (
+            CalledProcessError,
+            PackageError,
+            PackageNotFoundError,
+            IOError,
+            OSError,
+            shutil.Error,
+        ):
             self.unit.status = ops.BlockedStatus(
-                "Failed to install packages. Check `juju debug-log` for details."
-            )
-
-    def _on_config_changed(self, event):
-        """Update configuration and fetch relevant manpages."""
-        self.unit.status = ops.MaintenanceStatus("Updating configuration")
-        try:
-            self._manpages.configure(str(self.config["releases"]), self._get_external_url())
-        except ValueError:
-            self.unit.status = ops.BlockedStatus(
-                "Invalid configuration. Check `juju debug-log` for details."
+                "Failed to set up the environment. Check `juju debug-log` for details."
             )
             return
-
-        self.unit.status = ops.MaintenanceStatus("Updating manpages")
-        try:
-            self._manpages.update_manpages()
-        except CalledProcessError:
-            self.unit.status = ops.MaintenanceStatus(
-                "Failed to update manpages. Check `juju debug-log` for details."
-            )
+        self.unit.status = ops.ActiveStatus()
 
     def _on_start(self, event: ops.StartEvent):
-        """Start the manpages service."""
-        self.unit.status = ops.MaintenanceStatus("Starting manpages")
+        """Start the transition service."""
+        self.unit.status = ops.MaintenanceStatus("Starting transition")
         try:
-            self._manpages.restart()
+            self._transition.start()
         except CalledProcessError:
             self.unit.status = ops.BlockedStatus(
                 "Failed to start services. Check `juju debug-log` for details."
             )
             return
-
         self.unit.set_ports(PORT)
+        self.unit.status = ops.ActiveStatus()
 
-        if self._manpages.updating:
-            self.unit.status = ops.MaintenanceStatus("Updating manpages")
-        else:
-            self.unit.status = ops.ActiveStatus()
+    def _on_config_changed(self, event):
+        """Update configuration."""
+        self.unit.status = ops.MaintenanceStatus("Updating configuration")
+        try:
+            self._transition.configure(self._get_external_url())
+        except ValueError:
+            self.unit.status = ops.BlockedStatus(
+                "Invalid configuration. Check `juju debug-log` for details."
+            )
+            return
+        self.unit.status = ops.ActiveStatus()
 
-    def _on_update_status(self, event: ops.UpdateStatusEvent):
-        """Update status."""
-        if self._manpages.updating:
-            self.unit.status = ops.MaintenanceStatus("Updating manpages")
-        else:
-            self.unit.status = ops.ActiveStatus()
+    def _on_refresh_report(self, event: ops.ActionEvent):
+        """Refresh the report."""
+        self.unit.status = ops.MaintenanceStatus("Refreshing the report")
+
+        try:
+            event.log("Refreshing the report")
+            self._transition.refresh_report()
+        except (CalledProcessError, IOError):
+            event.log("Report refresh failed")
+            self.unit.status = ops.ActiveStatus(
+                "Failed to refresh the report. Check `juju debug-log` for details."
+            )
+            return
+        self.unit.status = ops.ActiveStatus()
 
     def _get_external_url(self) -> str:
-        """Report URL to access Ubuntu Manpages."""
+        """Report URL to access Ubuntu Transition Tracker."""
         # Default: FQDN
         external_url = f"http://{socket.getfqdn()}:{PORT}"
         # If can connect to juju-info, get unit IP
@@ -110,4 +116,4 @@ class ManpagesCharm(ops.CharmBase):
 
 
 if __name__ == "__main__":  # pragma: nocover
-    ops.main(ManpagesCharm)
+    ops.main(UbuntuTransitionCharm)

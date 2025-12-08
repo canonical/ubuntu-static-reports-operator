@@ -2,12 +2,14 @@
 # See LICENSE file for licensing details.
 import functools
 import logging
+import sys
 import time
 from urllib.parse import urlparse
 
+import jubilant
 from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, DEFAULT_RETRIES, HTTPAdapter
 
-MANPAGES = "manpages"
+APPNAME = "transition-tracker"
 HAPROXY = "haproxy"
 SSC = "self-signed-certificates"
 
@@ -88,3 +90,13 @@ class DNSResolverHTTPSAdapter(HTTPAdapter):
                 connection_pool_kwargs.pop("assert_hostname", None)
 
         return super().send(request, stream, timeout, verify, cert, proxies)
+
+
+@retry(retry_num=20, retry_sleep_sec=30)
+def wait_oneshot_finished(juju: jubilant.Juju, unit: str, service: str):
+    """Wait on service to complete after it has started."""
+    state = juju.ssh(unit, "systemctl show -p ActiveState -p SubState --value " + service)
+    ready = state == "inactive\ndead\n"
+    logging.debug(f"{sys._getframe().f_code.co_name} - state: {state}")
+    logging.debug(f"{sys._getframe().f_code.co_name} - ready: {ready}")
+    assert ready, f"State is {state}, expected finish is 'inactive\ndead\n'"

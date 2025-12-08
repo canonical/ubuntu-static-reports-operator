@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+# Get the current series from the transition-tracker configuration
+SERIES=$(grep '^SERIES=' /srv/transitions/transition-tracker/config/go | awk -F'=' '{print $2}')
+
+# Validate SERIES: must be lowercase letters only
+if [[ ! "$SERIES" =~ ^[a-z]+$ ]]; then
+    echo "Error: Invalid SERIES value '$SERIES'. Exiting." >&2
+    exit 1
+fi
+
+echo "The current series in the config is $SERIES"
+rsync -avz --delete --include '*/' --include 'Packages.gz' --include 'Sources.gz' --include 'Release' --exclude '*' rsync://archive.ubuntu.com/ubuntu/dists/$SERIES/ /srv/mirrors/ubuntu/dists/$SERIES/
+rsync -avz --delete --include '*/' --include 'Packages.gz' --include 'Sources.gz' --include 'Release' --exclude '*' rsync://archive.ubuntu.com/ubuntu/dists/$SERIES-proposed/ /srv/mirrors/ubuntu/dists/$SERIES-proposed/
+rsync -avz --include '*/' --include 'Packages.gz' --include 'Release' --exclude '*' rsync://ports.ubuntu.com/ubuntu-ports/dists/$SERIES/ /srv/mirrors/ubuntu/dists/$SERIES/
+rsync -avz --include '*/' --include 'Packages.gz' --include 'Release' --exclude '*' rsync://ports.ubuntu.com/ubuntu-ports/dists/$SERIES-proposed/ /srv/mirrors/ubuntu/dists/$SERIES-proposed/

@@ -8,29 +8,28 @@ and do not attempt to manipulate the underlying machine.
 """
 
 from subprocess import CalledProcessError
-from unittest.mock import PropertyMock, patch
+from unittest.mock import patch
 
 import pytest
-from charms.operator_libs_linux.v0.apt import PackageError, PackageNotFoundError
+from charmlibs.apt import PackageError, PackageNotFoundError
 from ops.testing import (
     ActiveStatus,
     Address,
     BindAddress,
     BlockedStatus,
     Context,
-    MaintenanceStatus,
     Network,
     Relation,
     State,
     TCPPort,
 )
 
-from charm import ManpagesCharm
+from charm import UbuntuTransitionCharm
 
 
 @pytest.fixture
 def ctx():
-    return Context(ManpagesCharm)
+    return Context(UbuntuTransitionCharm)
 
 
 @pytest.fixture
@@ -38,65 +37,68 @@ def base_state(ctx):
     return State(leader=True)
 
 
-@patch("charm.Manpages.install")
-def test_install_success(install_mock, ctx, base_state):
+@patch("charm.Transition.install")
+@patch("charm.Transition.setup_systemd_units")
+def test_install_success(systemd_mock, install_mock, ctx, base_state):
     install_mock.return_value = True
+    systemd_mock.return_value = True
     out = ctx.run(ctx.on.install(), base_state)
-    assert out.unit_status == MaintenanceStatus("Installing manpages")
+    assert out.unit_status == ActiveStatus()
     assert install_mock.called
 
 
-@patch("charm.Manpages.install")
+@patch("charm.Transition.install")
 @pytest.mark.parametrize(
-    "exception", [PackageError, PackageNotFoundError, CalledProcessError(1, "foo")]
+    "exception",
+    [
+        PackageError,
+        PackageNotFoundError,
+        CalledProcessError(1, "foo"),
+    ],
 )
 def test_install_failure(mock, exception, ctx, base_state):
     mock.side_effect = exception
     out = ctx.run(ctx.on.install(), base_state)
     assert out.unit_status == BlockedStatus(
-        "Failed to install packages. Check `juju debug-log` for details."
+        "Failed to set up the environment. Check `juju debug-log` for details."
     )
 
 
-@patch("charm.Manpages.install")
-def test_upgrade_success(install_mock, ctx, base_state):
+@patch("charm.Transition.install")
+@patch("charm.Transition.setup_systemd_units")
+def test_upgrade_success(systemd_mock, install_mock, ctx, base_state):
     install_mock.return_value = True
+    systemd_mock.return_value = True
     out = ctx.run(ctx.on.upgrade_charm(), base_state)
-    assert out.unit_status == MaintenanceStatus("Installing manpages")
+    assert out.unit_status == ActiveStatus()
     assert install_mock.called
 
 
-@patch("charm.Manpages.install")
+@patch("charm.Transition.install")
 @pytest.mark.parametrize(
-    "exception", [PackageError, PackageNotFoundError, CalledProcessError(1, "foo")]
+    "exception",
+    [
+        PackageError,
+        PackageNotFoundError,
+        CalledProcessError(1, "foo"),
+    ],
 )
-def test_upgrade_failure(mock, exception, ctx, base_state):
-    mock.side_effect = exception
+def test_upgrade_failure(install_mock, exception, ctx, base_state):
+    install_mock.side_effect = exception
     out = ctx.run(ctx.on.upgrade_charm(), base_state)
     assert out.unit_status == BlockedStatus(
-        "Failed to install packages. Check `juju debug-log` for details."
+        "Failed to set up the environment. Check `juju debug-log` for details."
     )
 
 
-@patch("charm.Manpages.configure")
-@patch("charm.Manpages.update_manpages")
-def test_config_changed(update_manpages_mock, configure_mock, ctx, base_state):
+@patch("charm.Transition.configure")
+def test_config_changed(configure_mock, ctx, base_state):
     out = ctx.run(ctx.on.config_changed(), base_state)
-    assert out.unit_status == MaintenanceStatus("Updating manpages")
+    assert out.unit_status == ActiveStatus("")
     assert configure_mock.called
-    assert update_manpages_mock.called
 
 
-@patch("charm.Manpages.configure")
-@patch("charm.Manpages.update_manpages")
-def test_update_manpages_action(update_manpages_mock, configure_mock, ctx, base_state):
-    out = ctx.run(ctx.on.action("update-manpages"), base_state)
-    assert out.unit_status == MaintenanceStatus("Updating manpages")
-    assert configure_mock.called
-    assert update_manpages_mock.called
-
-
-@patch("charm.Manpages.configure")
+@patch("charm.Transition.configure")
 def test_config_changed_failed_bad_config(configure_mock, ctx, base_state):
     configure_mock.side_effect = ValueError
     out = ctx.run(ctx.on.config_changed(), base_state)
@@ -105,29 +107,18 @@ def test_config_changed_failed_bad_config(configure_mock, ctx, base_state):
     )
 
 
-@patch("charm.Manpages.configure")
-@patch("charm.Manpages.update_manpages")
-def test_config_changed_failed_bad_update(update_manpages_mock, configure_mock, ctx, base_state):
-    update_manpages_mock.side_effect = CalledProcessError(1, "foo")
-    out = ctx.run(ctx.on.config_changed(), base_state)
-    assert configure_mock.called
-    assert out.unit_status == MaintenanceStatus(
-        "Failed to update manpages. Check `juju debug-log` for details."
-    )
-
-
-@patch("charm.Manpages.restart")
-def test_start_success(restart_mock, ctx, base_state):
+@patch("charm.Transition.start")
+def test_start_success(start_mock, ctx, base_state):
     out = ctx.run(ctx.on.start(), base_state)
     assert out.unit_status == ActiveStatus()
-    assert restart_mock.called
-    assert out.opened_ports == {TCPPort(port=8080, protocol="tcp")}
+    assert start_mock.called
+    assert out.opened_ports == {TCPPort(port=80, protocol="tcp")}
 
 
-@patch("charm.Manpages.restart")
+@patch("charm.Transition.start")
 @pytest.mark.parametrize("exception", [CalledProcessError(1, "foo")])
-def test_start_failure(mock, exception, ctx, base_state):
-    mock.side_effect = exception
+def test_start_failure(start_mock, exception, ctx, base_state):
+    start_mock.side_effect = exception
     out = ctx.run(ctx.on.start(), base_state)
     assert out.unit_status == BlockedStatus(
         "Failed to start services. Check `juju debug-log` for details."
@@ -135,70 +126,72 @@ def test_start_failure(mock, exception, ctx, base_state):
     assert out.opened_ports == frozenset()
 
 
-@patch("charm.Manpages.updating", new_callable=PropertyMock)
-def test_update_status_updating(updating_mock, ctx, base_state):
-    updating_mock.return_value = True
-    out = ctx.run(ctx.on.update_status(), base_state)
-    assert out.unit_status == MaintenanceStatus("Updating manpages")
-    assert updating_mock.called
-
-
-@patch("charm.Manpages.updating", new_callable=PropertyMock)
-def test_update_status_idle(updating_mock, ctx, base_state):
-    updating_mock.return_value = False
-    out = ctx.run(ctx.on.update_status(), base_state)
+@patch("charm.Transition.refresh_report")
+def test_transition_refresh_success(refresh_report_mock, ctx, base_state):
+    out = ctx.run(ctx.on.action("refresh"), base_state)
+    assert ctx.action_logs == ["Refreshing the report"]
     assert out.unit_status == ActiveStatus()
-    assert updating_mock.called
+    assert refresh_report_mock.called
 
 
-@patch("charm.Manpages.configure")
-@patch("charm.Manpages.update_manpages")
-def test_ingress_no_ingress_workload_url(update_manpages_mock, configure_mock):
-    ctx = Context(ManpagesCharm)
-
-    state = State(config={"releases": "noble"})
-    ctx.run(ctx.on.config_changed(), state)
-
-    configure_mock.assert_called_with("noble", "http://192.0.2.0:8080")
-
-
-@patch("charm.Manpages.configure")
-@patch("charm.Manpages.update_manpages")
-def test_ingress_relation_no_ingress_juju_info_binding(update_manpages_mock, configure_mock):
-    ctx = Context(ManpagesCharm)
-
-    state = State(
-        config={"releases": "noble"},
-        networks={Network("juju-info", [BindAddress([Address("10.10.10.10")])])},
+@patch("charm.Transition.refresh_report")
+def test_transition_refresh_failure(refresh_report_mock, ctx, base_state):
+    refresh_report_mock.side_effect = CalledProcessError(1, "refresh")
+    out = ctx.run(ctx.on.action("refresh"), base_state)
+    assert out.unit_status == ActiveStatus(
+        "Failed to refresh the report. Check `juju debug-log` for details."
     )
-    ctx.run(ctx.on.config_changed(), state)
-
-    configure_mock.assert_called_with("noble", "http://10.10.10.10:8080")
 
 
-@patch("charm.Manpages.configure")
-@patch("charm.Manpages.update_manpages")
-def test_ingress_relation_updates_workload_config(update_manpages_mock, configure_mock):
-    rel = Relation(
+@patch("charm.Transition.configure")
+@patch("charm.socket.getfqdn")
+@patch("ops.model.Model.get_binding")
+def test_get_external_url_fqdn_fallback(get_binding_mock, getfqdn_mock, configure_mock, ctx):
+    """Test that FQDN is used when no juju-info binding and no ingress."""
+    get_binding_mock.return_value = None
+    getfqdn_mock.return_value = "test-host.example.com"
+    state = State(leader=True)
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ActiveStatus()
+    configure_mock.assert_called_once_with("http://test-host.example.com:80")
+
+
+@patch("charm.Transition.configure")
+def test_get_external_url_juju_info_binding(configure_mock, ctx):
+    """Test that unit IP is used when juju-info binding exists."""
+    state = State(
+        leader=True,
+        networks={
+            Network(
+                "juju-info",
+                bind_addresses=[BindAddress(addresses=[Address("192.168.1.10")])],
+            ),
+        },
+    )
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ActiveStatus()
+    configure_mock.assert_called_once_with("http://192.168.1.10:80")
+
+
+@patch("charm.Transition.configure")
+def test_get_external_url_ingress_url(configure_mock, ctx):
+    """Test that ingress URL takes priority when available."""
+    ingress_relation = Relation(
         endpoint="ingress",
         interface="ingress",
-        remote_app_name="haproxy",
-        local_unit_data={
-            "model": "testing",
-            "name": "ubuntu-manpages",
-            "port": "8080",
-            "strip-prefix": "true",
-        },
-        remote_app_data={
-            "ingress": '{"url": "https://manpages.internal/testing-ubuntu-manpages/"}'
-        },
+        remote_app_name="traefik",
+        remote_app_data={"ingress": '{"url": "https://ingress.example.com/"}'},
     )
-
-    ctx = Context(ManpagesCharm)
-
-    state = State(relations=[rel], config={"releases": "noble"})
-    ctx.run(ctx.on.config_changed(), state)
-
-    configure_mock.assert_called_with(
-        "noble", "https://manpages.internal/testing-ubuntu-manpages/"
+    state = State(
+        leader=True,
+        networks={
+            Network(
+                "juju-info",
+                bind_addresses=[BindAddress(addresses=[Address("192.168.1.10")])],
+            ),
+        },
+        relations={ingress_relation},
     )
+    out = ctx.run(ctx.on.config_changed(), state)
+    assert out.unit_status == ActiveStatus()
+    configure_mock.assert_called_once_with("https://ingress.example.com/")

@@ -16,23 +16,18 @@ generate-requirements:
 lint:
 	uv tool run ruff check $(ALL)
 	uv tool run ruff format --check --diff $(ALL)
-	uv run --all-extras ty check $(SRC) $(TESTS)
-	shellcheck $(PROJECT)app/bin/*
-	shfmt -d $(PROJECT)app/bin/*
 
 format:
 	uv tool run ruff check --fix $(ALL)
 	uv tool run ruff format $(ALL)
-	shfmt -l -w $(PROJECT)app/bin/*
 
 unit:
 	uv run --all-extras \
 		coverage run \
 		--source=$(SRC) \
 		-m pytest \
-		--ignore=$(TESTS)/integration \
-		--ignore=$(TESTS)/functional \
 		--tb native \
+		tests/unit \
 		-v \
 		-s \
 		$(ARGS)
@@ -40,25 +35,11 @@ unit:
 
 integration:
 	uv run --all-extras \
-		pytest \
-		-v \
-		-x \
-		-s \
+		-m pytest \
 		--tb native \
-		--ignore=$(TESTS)/unit \
-		--ignore=$(TESTS)/functional \
-		--log-cli-level=INFO \
-		$(ARGS)
-
-functional:
-	uv run --all-extras \
-		pytest \
+		tests/integration \
 		-v \
-		-x \
 		-s \
-		--tb native \
-		--ignore=$(TESTS)/unit \
-		--ignore=$(TESTS)/integration \
 		--log-cli-level=INFO \
 		$(ARGS)
 
