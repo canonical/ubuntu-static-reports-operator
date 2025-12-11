@@ -4,7 +4,7 @@ This documents explains the processes and practices recommended for contributing
 this operator.
 
 - Generally, before developing enhancements to this charm, you should consider [opening an issue
-  ](https://github.com/canonical/transition-tracker-operator/issues) explaining your use case.
+  ](https://github.com/canonical/ubuntu-static-reports-operator/issues) explaining your use case.
 - If you would like to chat with us about your use-cases or proposed implementation, you can reach
   us [on Matrix](https://ubuntu.com/community/communications/matrix) or [Discourse](https://discourse.charmhub.io/).
 - Familiarising yourself with the [Operator Framework](https://ops.readthedocs.io/en/latest/) library
@@ -60,5 +60,5 @@ charmcraft pack
 ❯ juju model-config logging-config="<root>=INFO;unit=DEBUG"
 
 # Deploy the charm
-❯ juju deploy ./ubuntu-transition-tracker_amd64.charm
+❯ juju deploy ./ubuntu-static-reports_amd64.charm
 ```

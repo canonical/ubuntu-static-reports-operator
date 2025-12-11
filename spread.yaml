@@ -1,4 +1,4 @@
-project: ubuntu-transition-tracker-tests
+project: ubuntu-static-reports-tests
 kill-timeout: 90m
 workers: 1
 
@@ -9,7 +9,7 @@ backends:
   lxd:
     type: adhoc
     allocate: |
-      CONTAINER_NAME="transition-tracker-${SPREAD_SYSTEM/./-}-${RANDOM}"
+      CONTAINER_NAME="ubuntu-static-reports-${SPREAD_SYSTEM/./-}-${RANDOM}"
       DISK="${DISK:-20}"
       CPU="${CPU:-4}"
       MEM="${MEM:-8}"
@@ -47,8 +47,8 @@ suites:
 
       pushd "$SPREAD_PATH"
 
-      if [[ -f "$PWD/ubuntu-transition-tracker_amd64.charm" ]]; then
-        chown $(id -u):$(id -g) $PWD/ubuntu-transition-tracker_amd64.charm
+      if [[ -f "$PWD/ubuntu-static-reports_amd64.charm" ]]; then
+        chown $(id -u):$(id -g) $PWD/ubuntu-static-reports_amd64.charm
       fi
     restore-each: |
       if [[ -z "${CI:-}" ]]; then

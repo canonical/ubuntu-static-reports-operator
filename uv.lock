@@ -666,7 +666,7 @@ wheels = [
 ]
 
 [[package]]
-name = "transition-tracker-operator"
+name = "ubuntu-static-reports-operator"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

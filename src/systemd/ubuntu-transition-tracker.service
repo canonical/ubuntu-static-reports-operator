@@ -1,9 +1,0 @@
-[Unit]
-Description=Ubuntu Transition Tracker
-
-[Service]
-Type=oneshot
-# Specifying the user is required, the service errors out without it
-User=root
-ExecStartPre=syncmirror
-ExecStart=/srv/transitions/transition-tracker/config/go

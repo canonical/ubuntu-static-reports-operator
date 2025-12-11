@@ -1,16 +1,64 @@
-# Ubuntu Transition Tracker Operator
+# Ubuntu Static Reports Operator
 
 
-**Ubuntu  Transition Tracker Operator** is a [charm](https://juju.is/charms-architecture) for deploying an Ubuntu transition tracker environment.
+**Ubuntu Static Reports Operator** is a [charm](https://juju.is/charms-architecture)
+for building and presenting various static reports for Ubuntu. Fetching those
+live from launchpad API or similar sources every time would be too stressful
+and therefore are done on a regular schedule with the reports then being made
+available on the web.
 
-This reposistory contains the code for the charm, the application is coming from the `ben` package and the [configs repository](https://git.launchpad.net/~ubuntu-transition-trackers/ubuntu-transition-tracker/+git/configs).
+This reposistory contains the code for the charm, the applications are coming
+from various sources depending on the respective service.
+
+## List of covered services
+
+* update-sync-blocklist
+  * TL;DR: git checkout and serve as html avoiding pressure on the cgit frontend
+  * Timing: every 5 minutes
+  * Execution time: <30 seconds
+  * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-sync-blocklist
+  * Data: Maintained in git at https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist/tree/sync-blocklist.txt
+  * Presented: at https://ubuntu-archive-team.ubuntu.com/sync-blocklist.txt
+
+* package-subscribers
+  * TL;DR: convert LP API information about package subscribers to json for faster consumption by other tools
+  * Timing: hourly
+  * Execution time: ~3 min
+  * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/package-subscribers
+  * Data: Structural subscriptions in Launchpad of registered teams to source packages
+  * Presented at: https://ubuntu-archive-team.ubuntu.com/package-team-mapping.json
+
+* update-seeds
+  * TL;DR: conversion of git branches about the seeds into directories, to avoid pressure on the git servers
+  * Timing: every 5 minutes
+  * Execution time: <30 seconds
+  * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
+  * Data: Maintained in git at `https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}`
+  * Presented at https://ubuntu-archive-team.ubuntu.com/seeds/
+
+* permissions-report
+  * TL;DR: Convert LP API data into a report about package upload ACLs
+  * Timing: daily
+  * Execution time: ~30 minutes
+  * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
+  * Data: Per Package ACLs stored in Launchpad
+  * Presented at https://ubuntu-archive-team.ubuntu.com/archive-permissions/
+
+* packageset-report
+  * TL;DR: Convert LP API data into a report about package sets as used for upload permissions
+  * Timing: daily
+  * Execution time: ~30 minutes
+  * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
+  * Data: Package Set information stored in Launchpad
+  * Presented at https://ubuntu-archive-team.ubuntu.com/packagesets/
+
 
 ## Basic usage
 
 Assuming you have access to a bootstrapped [Juju](https://juju.is) controller, you can deploy the charm with:
 
 ```bash
-❯ juju deploy ubuntu-transition-tracker
+❯ juju deploy ubuntu-static-reports
 ```
 
 Once the charm is deployed, you can check the status with Juju status:
@@ -21,10 +69,10 @@ Model        Controller  Cloud/Region         Version  SLA          Timestamp
 welcome-lxd  lxd         localhost/localhost  3.6.7    unsupported  13:29:50+02:00
 
 App       Version  Status  Scale  Charm             Channel  Rev  Exposed  Message
-transition-tracker           active      1  ubuntu-transition-tracker             0  no
+ubuntu-static-reports           active      1  ubuntu-static-reports             0  no
 
 Unit          Workload  Agent  Machine  Public address  Ports  Message
-transition-tracker/0*  active    idle    1       10.142.46.109
+ubuntu-static-reports/0*  active    idle    1       10.142.46.109
 
 Machine  State    Address        Inst id         Base          AZ  Message
 1        started  10.142.46.109  juju-fd4fe1-1   ubuntu@24.04      Running
@@ -35,7 +83,7 @@ On first start up, the charm will install the application and install a systemd 
 To refresh the report, you can use the provided Juju [Action](https://documentation.ubuntu.com/juju/3.6/howto/manage-actions/):
 
 ```bash
-❯ juju run ubuntu-transition-tracker/0 refresh"
+❯ juju run ubuntu-static-reports/0 refresh"
 ```
 
 ## Testing
@@ -75,16 +123,16 @@ to drop into a shell after an error.
 ❯ charmcraft.spread -list
 lxd:ubuntu-24.04:tests/spread/integration/deploy-charm:juju_3_6
 lxd:ubuntu-24.04:tests/spread/integration/ingress:juju_3_6
-lxd:ubuntu-24.04:tests/spread/unit/transition-tracker
+lxd:ubuntu-24.04:tests/spread/unit/ubuntu-static-reports
 ❯ charmcraft.spread -v -debug -reuse lxd:ubuntu-24.04:tests/spread/integration/deploy-charm:juju_3_6
 ```
 
-## Contribute to Ubuntu Transition Tracker Operator
+## Contribute to Ubuntu Static Reports Operator
 
-Ubuntu Transition Tracker Operator is open source and part of the Canonical family. We would love your help.
+Ubuntu Static Reports Operator is open source and part of the Canonical family. We would love your help.
 
 If you're interested, start with the [contribution guide](CONTRIBUTING.md).
 
 ## License and copyright
 
-Ubuntu Transition Tracker Operator is released under the [GPL-3.0 license](LICENSE).
+Ubuntu Static Reports Operator is released under the [GPL-3.0 license](LICENSE).

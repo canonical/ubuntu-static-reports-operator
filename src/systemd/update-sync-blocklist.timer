@@ -1,0 +1,10 @@
+[Unit]
+Description=Ubuntu Static Reports - Update Sync Blocklist Web view
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

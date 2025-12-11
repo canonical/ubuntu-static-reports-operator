@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import jubilant
 from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, DEFAULT_RETRIES, HTTPAdapter
 
-APPNAME = "transition-tracker"
+APPNAME = "ubuntu-static-reports"
 HAPROXY = "haproxy"
 SSC = "self-signed-certificates"
 

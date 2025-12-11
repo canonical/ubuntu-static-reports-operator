@@ -1,0 +1,11 @@
+#! /bin/bash
+# Evolved from https://git.launchpad.net/ubuntu-archive-scripts/tree/update-sync-blocklist
+# To be less dependent on a prepared local setup or path
+set -uxe
+
+tempdir=$(mktemp -d)
+pushd "${tempdir}"
+git clone -b devel --depth=1 https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist
+mv sync-blocklist/sync-blocklist.txt /srv/staticreports/www/
+popd
+rm -rf "${tempdir}"

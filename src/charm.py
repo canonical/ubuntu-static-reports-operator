@@ -2,7 +2,7 @@
 # Copyright 2025 Canonical
 # See LICENSE file for licensing details.
 
-"""Charmed Operator for Ubuntu Transition Tracker."""
+"""Charmed Operator for Ubuntu Static Reports."""
 
 import logging
 import shutil
@@ -13,15 +13,15 @@ import ops
 from charmlibs.apt import PackageError, PackageNotFoundError
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer as IngressRequirer
 
-from transition import Transition
+from staticreports import StaticReports
 
 logger = logging.getLogger(__name__)
 
 PORT = 80
 
 
-class UbuntuTransitionCharm(ops.CharmBase):
-    """Charmed Operator for Ubuntu Transition Tracker."""
+class UbuntuStaticReportsCharm(ops.CharmBase):
+    """Charmed Operator for Ubuntu Static Reports."""
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
@@ -39,14 +39,14 @@ class UbuntuTransitionCharm(ops.CharmBase):
         framework.observe(self.ingress.on.ready, self._on_config_changed)
         framework.observe(self.ingress.on.revoked, self._on_config_changed)
 
-        self._transition = Transition()
+        self._staticreports = StaticReports()
 
     def _on_install(self, event: ops.EventBase):
         """Handle install, upgrade, config-changed, or ingress events."""
         self.unit.status = ops.MaintenanceStatus("Setting up environment")
         try:
-            self._transition.install()
-            self._transition.setup_systemd_units()
+            self._staticreports.install()
+            self._staticreports.setup_systemd_units()
         except (
             CalledProcessError,
             PackageError,
@@ -62,10 +62,10 @@ class UbuntuTransitionCharm(ops.CharmBase):
         self.unit.status = ops.ActiveStatus()
 
     def _on_start(self, event: ops.StartEvent):
-        """Start the transition service."""
-        self.unit.status = ops.MaintenanceStatus("Starting transition")
+        """Start the services of the static reports."""
+        self.unit.status = ops.MaintenanceStatus("Starting Static Reports")
         try:
-            self._transition.start()
+            self._staticreports.start()
         except CalledProcessError:
             self.unit.status = ops.BlockedStatus(
                 "Failed to start services. Check `juju debug-log` for details."
@@ -78,7 +78,7 @@ class UbuntuTransitionCharm(ops.CharmBase):
         """Update configuration."""
         self.unit.status = ops.MaintenanceStatus("Updating configuration")
         try:
-            self._transition.configure(self._get_external_url())
+            self._staticreports.configure(self._get_external_url())
         except ValueError:
             self.unit.status = ops.BlockedStatus(
                 "Invalid configuration. Check `juju debug-log` for details."
@@ -87,12 +87,12 @@ class UbuntuTransitionCharm(ops.CharmBase):
         self.unit.status = ops.ActiveStatus()
 
     def _on_refresh_report(self, event: ops.ActionEvent):
-        """Refresh the report."""
+        """Refresh all reports."""
         self.unit.status = ops.MaintenanceStatus("Refreshing the report")
 
         try:
             event.log("Refreshing the report")
-            self._transition.refresh_report()
+            self._staticreports.refresh_report()
         except (CalledProcessError, IOError):
             event.log("Report refresh failed")
             self.unit.status = ops.ActiveStatus(
@@ -102,7 +102,7 @@ class UbuntuTransitionCharm(ops.CharmBase):
         self.unit.status = ops.ActiveStatus()
 
     def _get_external_url(self) -> str:
-        """Report URL to access Ubuntu Transition Tracker."""
+        """Report URL to access Ubuntu Static Reports."""
         # Default: FQDN
         external_url = f"http://{socket.getfqdn()}:{PORT}"
         # If can connect to juju-info, get unit IP
@@ -116,4 +116,4 @@ class UbuntuTransitionCharm(ops.CharmBase):
 
 
 if __name__ == "__main__":  # pragma: nocover
-    ops.main(UbuntuTransitionCharm)
+    ops.main(UbuntuStaticReportsCharm)

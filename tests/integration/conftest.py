@@ -16,8 +16,8 @@ def juju():
 
 
 @fixture(scope="module")
-def transition_tracker_charm(request):
-    """transition-tracker charm used for integration testing."""
+def ubuntu_static_reports_charm(request):
+    """ubuntu-static-reports charm used for integration testing."""
     charm_file = request.config.getoption("--charm-path")
     if charm_file:
         return charm_file

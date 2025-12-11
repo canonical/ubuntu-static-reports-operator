@@ -1,4 +1,4 @@
-summary: Run transition-tracker python module unit tests
+summary: Run ubuntu-static-reports python module unit tests
 systems:
   - ubuntu-24.04
 

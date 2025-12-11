@@ -1,0 +1,7 @@
+[Unit]
+Description=Ubuntu Static Reports - Update Sync Blocklist Web view
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=update-sync-blocklist

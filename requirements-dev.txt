@@ -3,9 +3,9 @@
 annotated-types==0.7.0
     # via pydantic
 charmlibs-apt==1.0.0.post0
-    # via transition-tracker-operator (pyproject.toml)
+    # via ubuntu-static-reports-operator (pyproject.toml)
 coverage==7.12.0
-    # via transition-tracker-operator (pyproject.toml)
+    # via ubuntu-static-reports-operator (pyproject.toml)
 importlib-metadata==8.7.0
     # via opentelemetry-api
 iniconfig==2.3.0
@@ -16,7 +16,7 @@ opentelemetry-api==1.38.0
     #   ops
 ops==3.3.1
     # via
-    #   transition-tracker-operator (pyproject.toml)
+    #   ubuntu-static-reports-operator (pyproject.toml)
     #   ops-scenario
 ops-scenario==8.3.1
     # via ops
@@ -25,19 +25,19 @@ packaging==25.0
 pluggy==1.6.0
     # via pytest
 pydantic==2.12.4
-    # via transition-tracker-operator (pyproject.toml)
+    # via ubuntu-static-reports-operator (pyproject.toml)
 pydantic-core==2.41.5
     # via pydantic
 pygments==2.19.2
     # via pytest
 pytest==9.0.1
-    # via transition-tracker-operator (pyproject.toml)
+    # via ubuntu-static-reports-operator (pyproject.toml)
 pyyaml==6.0.3
     # via
     #   ops
     #   ops-scenario
 ruff==0.14.6
-    # via transition-tracker-operator (pyproject.toml)
+    # via ubuntu-static-reports-operator (pyproject.toml)
 typing-extensions==4.15.0
     # via
     #   opentelemetry-api

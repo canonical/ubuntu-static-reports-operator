@@ -1188,7 +1188,7 @@ class DebianRepository:
         """
         # options=mr - machine-readable output (disables html wrappers)
         keyserver_url = (
-            "https://keyserver.ubuntu.com" "/pks/lookup?op=get&options=mr&exact=on&search=0x{}"
+            "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&exact=on&search=0x{}"
         )
         curl_cmd = ["curl", keyserver_url.format(keyid)]
         # use proxy server settings in order to retrieve the key

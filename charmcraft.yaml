@@ -1,27 +1,28 @@
-name: ubuntu-transition-tracker
+name: ubuntu-static-reports
 type: charm
-title: Ubuntu Transition Tracker charm
-summary: Generate Transition reports for Ubuntu
+title: Ubuntu Static Reports charm
+summary: Generate Static reports for Ubuntu
 description: |
-  **Ubuntu Transition Tracker Operator** is a [charm](https://juju.is/charms-architecture)
-  for building transition tracker reports for Ubuntu.
-
+  **Ubuntu Static Reports Operator** is a [charm](https://juju.is/charms-architecture)
+  for building and presenting various static reports for Ubuntu. Fetching those
+  live from launchpad API or similar sources every time would be too stressful
+  and therefore are done on a regular schedule with the reports then being made
+  available on the web.
 
 links:
   website:
-    - https://charmhub.io/ubuntu-transition-tracker
+    - https://charmhub.io/ubuntu-static-reports
   issues:
-    - https://github.com/canonical/transition-tracker-operator/issues
+    - https://github.com/canonical/ubuntu-static-reports-operator/issues
   source:
-    - https://github.com/canonical/transition-tracker-operator
-
+    - https://github.com/canonical/ubuntu-static-reports-operator
 
 base: ubuntu@24.04
 platforms:
   amd64:
 
 parts:
-  transition-tracker-charm:
+  ubuntu-static-reports-charm:
     source: .
     plugin: uv
     build-packages: [git]
@@ -39,7 +40,7 @@ charm-libs:
 actions:
   refresh:
     description: |
-      Refresh the content of the transition tracker
+      Force refreshing the content of the static reports.
 
 requires:
   ingress:
