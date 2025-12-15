@@ -5,12 +5,7 @@
 set -e
 
 workdir=${WORKDIR:-"~/public_html/seeds"}
-
 cd "$workdir"
-if ! lockfile -r2 .update.lock; then
-    exit 1
-fi
-trap 'rm -f .update.lock' EXIT HUP INT QUIT TERM
 
 ONLY_SERIES="$1"
 
