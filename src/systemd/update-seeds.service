@@ -3,7 +3,17 @@ Description=Ubuntu Static Reports - Update Seeds Web view
 
 [Service]
 Type=oneshot
-User=ubuntu
 Environment="WORKDIR=/srv/staticreports/www/seeds"
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
 ExecStartPre=mkdir -p ${WORKDIR}
 ExecStart=update-seeds

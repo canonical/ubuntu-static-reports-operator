@@ -3,6 +3,16 @@ Description=Ubuntu Static Reports - Update Sync Blocklist Web view
 
 [Service]
 Type=oneshot
-User=ubuntu
 Environment="DESTINATION=/srv/staticreports/www/sync-blocklist.txt"
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
 ExecStart=update-sync-blocklist
