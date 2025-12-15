@@ -79,10 +79,8 @@ for dist in platform.{jammy,noble,plucky,questing,resolute} \
             ;;
     esac
     if [ -d "$dist" ]; then
-        echo "Status: In-place updates from git"
         retry_cmd "git -C $dist pull --quiet --force" || exit 1
     else
-        echo "Status: Initial clones"
         repo="https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}"
         series="${dist##*.}"
         retry_cmd "git clone --quiet --branch $series $repo $dist" || exit 1
