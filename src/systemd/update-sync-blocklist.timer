@@ -1,5 +1,5 @@
 [Unit]
-Description=Ubuntu Static Reports - Update Sync Blocklist Web view
+Description=Ubuntu Static Reports - Update Sync Blocklist web view
 
 [Timer]
 OnBootSec=1min
