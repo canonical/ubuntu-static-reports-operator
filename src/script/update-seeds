@@ -81,10 +81,10 @@ for dist in platform.{jammy,noble,plucky,questing,resolute} \
     branch="https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}"
     if [ -d "$dist" ]; then
         echo "Status: In-place update from git"
-        retry_cmd "git -C \"$dist\" pull -f >/dev/null 2>&1" || exit 1
+        retry_cmd "git -q -C \"$dist\" pull -f" || exit 1
     else
         echo "Status: Initial clone"
         series="${dist##*.}"
-        retry_cmd "git clone -b \"$series\" \"$branch\" \"$dist\" >/dev/null 2>&1" || exit 1
+        retry_cmd "git -q clone -b \"$series\" \"$branch\" \"$dist\"" || exit 1
     fi
 done
