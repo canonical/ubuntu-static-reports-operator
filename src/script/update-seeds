@@ -9,7 +9,8 @@ cd "$workdir"
 
 ONLY_SERIES="$1"
 
-# Retry helper: run a command string with exponential backoff.
+# Retry helper: run a command string with exponential backoff
+# used to tolerate transient infra failures.
 # Optional external configuration with environment variables:
 #   MAX_ATTEMPTS (default 5)
 #   INITIAL_DELAY (seconds, default 2)
@@ -79,10 +80,10 @@ for dist in platform.{jammy,noble,plucky,questing,resolute} \
     esac
     branch="https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}"
     if [ -d "$dist" ]; then
-        # Pull with retries to tolerate transient infra failures.
+        echo "Status: In-place update from git"
         retry_cmd "git -C \"$dist\" pull -f >/dev/null 2>&1" || exit 1
     else
-        # Clone with retries; extract series with parameter expansion.
+        echo "Status: Initial clone"
         series="${dist##*.}"
         retry_cmd "git clone -b \"$series\" \"$branch\" \"$dist\" >/dev/null 2>&1" || exit 1
     fi
