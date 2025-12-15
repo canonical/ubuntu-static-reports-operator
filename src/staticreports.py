@@ -29,15 +29,6 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/seeds"), "ubuntu", "ubuntu"),
 ]
 
-# repo-url, branch and target directory
-REPO_URLS = [
-    (
-        "https://git.launchpad.net/ubuntu-archive-scripts",
-        "main",
-        Path("src/ubuntu-archive-scripts"),
-    ),
-]
-
 NGINX_SITE_CONFIG_PATH = Path("/etc/nginx/conf.d/staticreports.conf")
 
 UBUNTU_STATIC_REPORT_SERVICES = [
@@ -105,50 +96,10 @@ class StaticReports:
                 logger.warning("Creating directory %s failed: %s", dname, e)
                 raise
 
-        logger.info("Updating repositories")
-        for rurl, rbranch, rtarget in REPO_URLS:
-            logger.debug(f"Handle repository {rurl}")
-            try:
-                if not rtarget.is_dir():
-                    run(
-                        [
-                            "git",
-                            "clone",
-                            "-b",
-                            rbranch,
-                            rurl,
-                            rtarget,
-                        ],
-                        check=True,
-                        env=self.env,
-                        stdout=PIPE,
-                        stderr=STDOUT,
-                        text=True,
-                        timeout=300,
-                    )
-                else:
-                    run(
-                        [
-                            "git",
-                            "pull",
-                            rbranch,
-                        ],
-                        cwd=rtarget,
-                        check=True,
-                        env=self.env,
-                        stdout=PIPE,
-                        stderr=STDOUT,
-                        text=True,
-                        timeout=300,
-                    )
-            except (CalledProcessError, SubprocessError, FileNotFoundError) as e:
-                logger.warning("Git handling {rurl} failed: %s", e.stdout)
-                raise
-
         logger.info("Installing App and Config files")
         try:
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
-            shutil.copy("src/ubuntu-archive-scripts/update-seeds", "/usr/bin")
+            shutil.copy("src/script/update-seeds", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:

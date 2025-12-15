@@ -4,9 +4,6 @@ Description=Ubuntu Static Reports - Update Seeds Web view
 [Service]
 Type=oneshot
 User=ubuntu
-ExecStartPre=rm -rf /home/ubuntu/public_html/seeds
-ExecStartPre=mkdir -p /home/ubuntu/public_html/seeds
+Environment="WORKDIR=/srv/staticreports/www/seeds"
+ExecStartPre=mkdir -p ${WORKDIR}
 ExecStart=update-seeds
-ExecStartPost=rm -rf //srv/staticreports/www/seeds
-ExecStartPost=mv -v /home/ubuntu/public_html/seeds /srv/staticreports/www/seeds
-

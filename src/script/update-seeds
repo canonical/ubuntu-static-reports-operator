@@ -1,0 +1,94 @@
+#! /bin/bash
+# Evolved from
+# https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
+# To be less dependent on a prepared local setup or path
+set -e
+
+workdir=${WORKDIR:-"~/public_html/seeds"}
+
+cd "$workdir"
+if ! lockfile -r2 .update.lock; then
+    exit 1
+fi
+trap 'rm -f .update.lock' EXIT HUP INT QUIT TERM
+
+ONLY_SERIES="$1"
+
+# Retry helper: run a command string with exponential backoff.
+# Optional external configuration with environment variables:
+#   MAX_ATTEMPTS (default 5)
+#   INITIAL_DELAY (seconds, default 2)
+# Using eval to allow complex commands with pipes/redirection.
+retry_cmd() {
+    local cmd="$1"
+    local max_attempts=${MAX_ATTEMPTS:-5}
+    local attempt=1
+    local delay=${INITIAL_DELAY:-2}
+
+    while true; do
+        if eval "$cmd"; then
+            return 0
+        fi
+        if [ "$attempt" -ge "$max_attempts" ]; then
+            echo "ERROR: command failed after $attempt attempts: $cmd" >&2
+            return 1
+        fi
+        echo "Warning: command failed (attempt $attempt/$max_attempts). Retrying in $delay seconds..." >&2
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}
+
+for dist in platform.{jammy,noble,plucky,questing,resolute} \
+            ubuntu.{jammy,noble,plucky,questing,resolute} \
+            kubuntu.{jammy,noble,plucky,questing,resolute} \
+            edubuntu.{noble,plucky,questing,resolute} \
+            xubuntu.{jammy,noble,plucky,questing,resolute} \
+            i386.{jammy,noble,plucky,questing,resolute} \
+            ubuntustudio.{jammy,noble,plucky,questing,resolute} \
+            lubuntu.{jammy,noble,plucky,questing,resolute} \
+            ubuntukylin.{jammy,noble,plucky,questing,resolute} \
+            ubuntucinnamon.{noble,plucky,questing,resolute} \
+            ubuntu-core.{jammy,noble,plucky,questing,resolute} \
+            ubuntu-mate.{jammy,noble,plucky,questing,resolute} \
+            ubuntu-budgie.{jammy,noble,plucky,questing,resolute} \
+            ubuntu-unity.{noble,plucky,questing,resolute}; do
+    if [ "$ONLY_SERIES" ]; then
+        case $dist in
+            *.$ONLY_SERIES)
+                ;;
+            *)
+                continue
+                ;;
+        esac
+    fi
+
+    case $dist in
+        edubuntu.*|kubuntu.*|xubuntu.*|ubuntustudio.*|lubuntu.*|\
+        ubuntu-gnome.*|ubuntu-mate.*|ubuntucinnamon.*)
+            team=${dist%.*}-dev
+            ;;
+        ubuntukylin.*)
+            team=ubuntukylin-members
+            ;;
+        ubuntu-budgie.*)
+            team=ubuntubudgie-dev
+            ;;
+        ubuntu-unity.*)
+            team=unity7maintainers
+            ;;
+        *)
+            team=ubuntu-core-dev
+            ;;
+    esac
+    branch="https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}"
+    if [ -d "$dist" ]; then
+        # Pull with retries to tolerate transient infra failures.
+        retry_cmd "git -C \"$dist\" pull -f >/dev/null 2>&1" || exit 1
+    else
+        # Clone with retries; extract series with parameter expansion.
+        series="${dist##*.}"
+        retry_cmd "git clone -b \"$series\" \"$branch\" \"$dist\" >/dev/null 2>&1" || exit 1
+    fi
+done

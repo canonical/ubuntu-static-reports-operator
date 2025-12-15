@@ -3,5 +3,6 @@ Description=Ubuntu Static Reports - Update Sync Blocklist Web view
 
 [Service]
 Type=oneshot
-User=root
+User=ubuntu
+Environment="DESTINATION=/srv/staticreports/www/sync-blocklist.txt"
 ExecStart=update-sync-blocklist

@@ -1,11 +1,23 @@
-#! /bin/bash
-# Evolved from https://git.launchpad.net/ubuntu-archive-scripts/tree/update-sync-blocklist
+#! /bin/sh
+# Evolved from
+# https://git.launchpad.net/ubuntu-archive-scripts/tree/update-sync-blocklist
 # To be less dependent on a prepared local setup or path
-set -uxe
+set -e
 
-tempdir=$(mktemp -d)
-pushd "${tempdir}"
-git clone -b devel --depth=1 https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist
-mv sync-blocklist/sync-blocklist.txt /srv/staticreports/www/
-popd
-rm -rf "${tempdir}"
+gitdir="$HOME/sync-blocklist"
+datafile="$gitdir/sync-blocklist.txt"
+# Allow to specify the destination externally
+destination=${DESTINATION:-"$HOME/public_html/sync-blocklist.txt"}
+
+if [ -d "$gitdir" ]; then
+    echo "Status: In-place update from git"
+    git -C "$gitdir" pull -q
+else
+    echo "Status: Initial clone"
+    git clone -b devel --depth=1 https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist "$gitdir"
+fi
+
+# Atomic update (only the file is in the web path)
+cp -a "$datafile" "${destination}.new"
+echo "Status: atomic exchange"
+mv "${destination}.new" "${destination}"

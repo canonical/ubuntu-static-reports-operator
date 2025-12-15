@@ -31,7 +31,7 @@ from various sources depending on the respective service.
 * update-seeds
   * TL;DR: conversion of git branches about the seeds into directories, to avoid pressure on the git servers
   * Timing: every 5 minutes
-  * Execution time: <30 seconds
+  * Execution time: ~8 minutes
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
   * Data: Maintained in git at `https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}`
   * Presented at https://ubuntu-archive-team.ubuntu.com/seeds/
