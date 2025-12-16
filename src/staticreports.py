@@ -21,6 +21,7 @@ PACKAGES = [
     "git",
     "nginx-light",
     "procmail",
+    "python3-keyring",
 ]
 
 # Directories and ownership as needed for the services to run
