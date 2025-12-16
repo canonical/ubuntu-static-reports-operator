@@ -27,6 +27,8 @@ PACKAGES = [
 SRV_DIRS = [
     (Path("/srv/staticreports/www"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/seeds"), "ubuntu", "ubuntu"),
+    (Path("/srv/staticreports/www/packagesets"), "ubuntu", "ubuntu"),
+    (Path("/srv/staticreports/www/archive-permissions"), "ubuntu", "ubuntu"),
 ]
 
 # repo-url, branch and target directory
@@ -43,6 +45,9 @@ NGINX_SITE_CONFIG_PATH = Path("/etc/nginx/conf.d/staticreports.conf")
 UBUNTU_STATIC_REPORT_SERVICES = [
     "update-sync-blocklist",
     "update-seeds",
+    "packageset-report",
+    "package-subscribers",
+    "permissions-report",
 ]
 
 
