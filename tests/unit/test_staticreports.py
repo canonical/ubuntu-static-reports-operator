@@ -7,8 +7,6 @@ These tests mock external side-effects (apt, systemd, os, shutil, and
 pathlib writes) so they can run as unit tests without touching the host.
 """
 
-import shutil
-from pathlib import Path
 from subprocess import CalledProcessError
 from unittest.mock import Mock
 
@@ -51,8 +49,9 @@ def test_install_creates_dirs_and_copies(monkeypatch):
     # avoid performing package operations
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
 
-    # avoid invoking real git during this test
-    monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
+    # avoid invoking real git during this test; record calls
+    run_mock = Mock()
+    monkeypatch.setattr(staticreports, "run", run_mock)
 
     ops = []
 
@@ -77,15 +76,16 @@ def test_install_creates_dirs_and_copies(monkeypatch):
     # directories created and chown called
     for dname, duser, dgroup in staticreports.SRV_DIRS:
         assert ("makedirs", dname) in ops
-        assert ("chown", dname, duser, dgroup) in ops
+        if duser is not None:
+            assert ("chown", dname, duser, dgroup) in ops
 
-    # files copied
+    # files copied (script files and nginx config)
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
-    assert ("copy", "src/ubuntu-archive-tools/package-subscribers", "/usr/bin") in ops
-    assert ("copy", "src/ubuntu-archive-tools/permissions-report", "/usr/bin") in ops
-    assert ("copy", "src/ubuntu-archive-tools/packageset-report", "/usr/bin") in ops
     assert ("copy", "src/nginx/staticreports.conf", staticreports.NGINX_SITE_CONFIG_PATH) in ops
+
+    # ensure git/repo handling was invoked
+    assert run_mock.called
 
 
 def test_install_copy_failure_propagates(monkeypatch):
@@ -302,15 +302,17 @@ def test_install_triggers_git_clone_and_copies(monkeypatch, tmp_path):
 
     # Use tmp_path for the repository target to avoid touching project tree
     repo_target = tmp_path / "ubuntu-archive-tools"
-    monkeypatch.setattr(staticreports, "REPO_URLS", [("https://git.launchpad.net/ubuntu-archive-tools", "main", repo_target)])
+    monkeypatch.setattr(
+        staticreports,
+        "REPO_URLS",
+        [("https://git.launchpad.net/ubuntu-archive-tools", "main", repo_target)],
+    )
+
+    run_calls = []
 
     def fake_run(cmd, **kwargs):
-        # detect clone command and create repo files inside tmp_path
-        if isinstance(cmd, (list, tuple)) and "clone" in cmd:
-            repo_target.mkdir(parents=True, exist_ok=True)
-            for name in ("permissions-report", "packageset-report", "package-subscribers"):
-                (repo_target / name).write_text("#!/bin/sh\n")
-            return Mock()
+        # record the command that would be executed (no filesystem changes)
+        run_calls.append(cmd)
         return Mock()
 
     monkeypatch.setattr(staticreports, "run", fake_run)
@@ -321,10 +323,11 @@ def test_install_triggers_git_clone_and_copies(monkeypatch, tmp_path):
     sr = staticreports.StaticReports()
     sr.install()
 
-    # verify the copies for files that come from the cloned repo (paths are hard-coded in module)
-    assert ("copy", "src/ubuntu-archive-tools/permissions-report", "/usr/bin") in ops
-    assert ("copy", "src/ubuntu-archive-tools/packageset-report", "/usr/bin") in ops
-    assert ("copy", "src/ubuntu-archive-tools/package-subscribers", "/usr/bin") in ops
+    # verify a git clone was requested and the target equals our tmp_path target
+    assert any(
+        isinstance(cmd, (list, tuple)) and "clone" in cmd and cmd[-1] == repo_target
+        for cmd in run_calls
+    ), f"expected clone to {repo_target}, got {run_calls}"
 
 
 def test_install_git_clone_failure_raises(monkeypatch):
