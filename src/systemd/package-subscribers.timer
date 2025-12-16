@@ -3,7 +3,7 @@ Description=Ubuntu Static Reports - Update Package Subscribers web view
 
 [Timer]
 OnBootSec=3min
-OnUnitActiveSec=6h
+OnUnitActiveSec=30min
 RandomizedDelaySec=300
 
 [Install]

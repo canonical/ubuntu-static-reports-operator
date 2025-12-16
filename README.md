@@ -20,25 +20,25 @@ from various sources depending on the respective service.
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist/tree/sync-blocklist.txt
   * Presented: at https://ubuntu-archive-team.ubuntu.com/sync-blocklist.txt
 
-* package-subscribers
-  * TL;DR: convert LP API information about package subscribers to json for faster consumption by other tools
-  * Timing: hourly
-  * Execution time: ~3 min
-  * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/package-subscribers
-  * Data: Structural subscriptions in Launchpad of registered teams to source packages
-  * Presented at: https://ubuntu-archive-team.ubuntu.com/package-team-mapping.json
-
 * update-seeds
-  * TL;DR: conversion of git branches about the seeds into directories, to avoid pressure on the git servers
+  * TL;DR: conversion of git branches about the seeds into directories, avoids pressure on the git servers
   * Timing: every 5 minutes
   * Execution time: ~13 minutes initially, 1 minute on updates
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
   * Data: Maintained in git at `https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}`
   * Presented at https://ubuntu-archive-team.ubuntu.com/seeds/
 
+* package-subscribers
+  * TL;DR: convert LP API information about package subscribers to json for faster consumption by other tools
+  * Timing: twice an hour
+  * Execution time: ~3 min
+  * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/package-subscribers
+  * Data: Structural subscriptions in Launchpad of registered teams to source packages
+  * Presented at: https://ubuntu-archive-team.ubuntu.com/package-team-mapping.json
+
 * permissions-report
   * TL;DR: Convert LP API data into a report about package upload ACLs
-  * Timing: daily
+  * Timing: every 6 hours
   * Execution time: ~30 minutes
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Per Package ACLs stored in Launchpad
@@ -46,12 +46,11 @@ from various sources depending on the respective service.
 
 * packageset-report
   * TL;DR: Convert LP API data into a report about package sets as used for upload permissions
-  * Timing: daily
+  * Timing: every 6 hours
   * Execution time: ~30 minutes
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Package Set information stored in Launchpad
   * Presented at https://ubuntu-archive-team.ubuntu.com/packagesets/
-
 
 ## Basic usage
 
