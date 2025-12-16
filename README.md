@@ -85,6 +85,56 @@ To refresh the report, you can use the provided Juju [Action](https://documentat
 ❯ juju run ubuntu-static-reports/0 refresh"
 ```
 
+## Checking a live worker node
+
+To analyze the status of all reports - when they ran or when they will run
+next, the log output of each and more - use systemctl as the are all systemd
+timers and services.
+
+```bash
+❯ systemctl list-timers --all update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report
+NEXT                        LEFT LAST                              PASSED UNIT                        ACTIVATES
+Tue 2025-12-16 14:57:43 UTC   1s -                                      - package-subscribers.timer   package-subscribers.service
+Tue 2025-12-16 14:57:45 UTC   3s Tue 2025-12-16 14:52:12 UTC     5min ago update-seeds.timer          update-seeds.service
+Tue 2025-12-16 14:57:48 UTC   6s -                                      - packageset-report.timer     packageset-report.service
+Tue 2025-12-16 14:57:56 UTC  13s Tue 2025-12-16 14:52:43 UTC 4min 58s ago update-sync-blocklist.timer update-sync-blocklist.service
+-                              - Tue 2025-12-16 14:56:33 UTC  1min 8s ago permissions-report.timer    permissions-report.service
+```
+
+Since the report execution is wrapped into systemd services, one can also use
+`systemctl status` as well as `journalctl -u` to assess state and debug if
+neccessary.
+
+```bash
+❯ journalctl -u update-sync-blocklist
+Dec 16 14:52:12 juju-c5cbb1-23 systemd[1]: Starting update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view...
+Dec 16 14:52:12 juju-c5cbb1-23 update-sync-blocklist[6405]: Status: Initial clone
+Dec 16 14:52:12 juju-c5cbb1-23 update-sync-blocklist[6423]: Cloning into '/home/ubuntu/sync-blocklist'...
+Dec 16 14:52:13 juju-c5cbb1-23 update-sync-blocklist[6405]: Status: atomic exchange
+Dec 16 14:52:13 juju-c5cbb1-23 systemd[1]: update-sync-blocklist.service: Deactivated successfully.
+Dec 16 14:52:13 juju-c5cbb1-23 systemd[1]: Finished update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view.
+Dec 16 14:52:43 juju-c5cbb1-23 systemd[1]: Starting update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view...
+Dec 16 14:52:43 juju-c5cbb1-23 update-sync-blocklist[6569]: Status: In-place update from git
+Dec 16 14:52:45 juju-c5cbb1-23 update-sync-blocklist[6569]: Status: atomic exchange
+Dec 16 14:52:45 juju-c5cbb1-23 systemd[1]: update-sync-blocklist.service: Deactivated successfully.
+
+
+❯ systemctl status update-sync-blocklist.service
+○ update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view
+     Loaded: loaded (/etc/systemd/system/update-sync-blocklist.service; static)
+     Active: inactive (dead) since Tue 2025-12-16 14:57:57 UTC; 3min 45s ago
+TriggeredBy: ● update-sync-blocklist.timer
+    Process: 7536 ExecStart=update-sync-blocklist (code=exited, status=0/SUCCESS)
+   Main PID: 7536 (code=exited, status=0/SUCCESS)
+        CPU: 70ms
+
+Dec 16 14:57:56 juju-c5cbb1-23 systemd[1]: Starting update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view...
+Dec 16 14:57:56 juju-c5cbb1-23 update-sync-blocklist[7536]: Status: In-place update from git
+Dec 16 14:57:57 juju-c5cbb1-23 update-sync-blocklist[7536]: Status: atomic exchange
+Dec 16 14:57:57 juju-c5cbb1-23 systemd[1]: update-sync-blocklist.service: Deactivated successfully.
+Dec 16 14:57:57 juju-c5cbb1-23 systemd[1]: Finished update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view.
+```
+
 ## Testing
 
 There are unit tests which can be run directly without influence to
