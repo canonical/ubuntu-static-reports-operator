@@ -7,6 +7,8 @@ These tests mock external side-effects (apt, systemd, os, shutil, and
 pathlib writes) so they can run as unit tests without touching the host.
 """
 
+import shutil
+from pathlib import Path
 from subprocess import CalledProcessError
 from unittest.mock import Mock
 
@@ -49,6 +51,9 @@ def test_install_creates_dirs_and_copies(monkeypatch):
     # avoid performing package operations
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
 
+    # avoid invoking real git during this test
+    monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
+
     ops = []
 
     monkeypatch.setattr(
@@ -77,6 +82,9 @@ def test_install_creates_dirs_and_copies(monkeypatch):
     # files copied
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
+    assert ("copy", "src/ubuntu-archive-tools/package-subscribers", "/usr/bin") in ops
+    assert ("copy", "src/ubuntu-archive-tools/permissions-report", "/usr/bin") in ops
+    assert ("copy", "src/ubuntu-archive-tools/packageset-report", "/usr/bin") in ops
     assert ("copy", "src/nginx/staticreports.conf", staticreports.NGINX_SITE_CONFIG_PATH) in ops
 
 
@@ -84,6 +92,9 @@ def test_install_copy_failure_propagates(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+
+    # avoid invoking real git during this test
+    monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
 
     def bad_copy(src, dst):
         raise OSError("disk full")
@@ -277,3 +288,57 @@ def test_refresh_report_logs_stdout_on_failure(monkeypatch, caplog):
         with pytest.raises(CalledProcessError):
             sr.refresh_report()
     assert "failed output" in caplog.text
+
+
+def test_install_triggers_git_clone_and_copies(monkeypatch, tmp_path):
+    # Ensure install doesn't touch system dirs
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+
+    ops = []
+    monkeypatch.setattr(
+        staticreports.shutil, "copy", lambda src, dst: ops.append(("copy", str(src), str(dst)))
+    )
+
+    # Use tmp_path for the repository target to avoid touching project tree
+    repo_target = tmp_path / "ubuntu-archive-tools"
+    monkeypatch.setattr(staticreports, "REPO_URLS", [("https://git.launchpad.net/ubuntu-archive-tools", "main", repo_target)])
+
+    def fake_run(cmd, **kwargs):
+        # detect clone command and create repo files inside tmp_path
+        if isinstance(cmd, (list, tuple)) and "clone" in cmd:
+            repo_target.mkdir(parents=True, exist_ok=True)
+            for name in ("permissions-report", "packageset-report", "package-subscribers"):
+                (repo_target / name).write_text("#!/bin/sh\n")
+            return Mock()
+        return Mock()
+
+    monkeypatch.setattr(staticreports, "run", fake_run)
+
+    # avoid package installs
+    monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+
+    sr = staticreports.StaticReports()
+    sr.install()
+
+    # verify the copies for files that come from the cloned repo (paths are hard-coded in module)
+    assert ("copy", "src/ubuntu-archive-tools/permissions-report", "/usr/bin") in ops
+    assert ("copy", "src/ubuntu-archive-tools/packageset-report", "/usr/bin") in ops
+    assert ("copy", "src/ubuntu-archive-tools/package-subscribers", "/usr/bin") in ops
+
+
+def test_install_git_clone_failure_raises(monkeypatch):
+    # Ensure install doesn't touch system dirs
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+
+    # Make run raise to simulate git failure
+    def bad_run(cmd, **kwargs):
+        raise CalledProcessError(2, "git")
+
+    monkeypatch.setattr(staticreports, "run", bad_run)
+    monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+
+    sr = staticreports.StaticReports()
+    with pytest.raises(CalledProcessError):
+        sr.install()
