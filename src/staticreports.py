@@ -30,6 +30,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/seeds"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/packagesets"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/archive-permissions"), "ubuntu", "ubuntu"),
+    (Path("/usr/local/src"), None, None),
 ]
 
 # repo-url, branch and target directory
@@ -37,7 +38,7 @@ REPO_URLS = [
     (
         "https://git.launchpad.net/ubuntu-archive-tools",
         "main",
-        Path("src/ubuntu-archive-tools"),
+        Path("/usr/local/src/ubuntu-archive-tools"),
     ),
 ]
 
@@ -155,9 +156,6 @@ class StaticReports:
         try:
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
-            shutil.copy("src/ubuntu-archive-tools/permissions-report", "/usr/bin")
-            shutil.copy("src/ubuntu-archive-tools/packageset-report", "/usr/bin")
-            shutil.copy("src/ubuntu-archive-tools/package-subscribers", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:

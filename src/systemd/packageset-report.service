@@ -15,5 +15,6 @@ ProtectKernelModules=yes
 ProtectKernelTunables=yes
 RestrictSUIDSGID=yes
 
+WorkingDirectory=/usr/local/src/ubuntu-archive-tools
 ExecStartPre=mkdir -p ${WORKDIR}
-ExecStart=packageset-report ${WORKDIR}
+ExecStart=/usr/local/src/ubuntu-archive-tools/packageset-report ${WORKDIR}

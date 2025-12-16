@@ -14,5 +14,6 @@ ProtectKernelModules=yes
 ProtectKernelTunables=yes
 RestrictSUIDSGID=yes
 
-ExecStart=package-subscribers -q -o /home/ubuntu/package-team-mapping.json.new
+WorkingDirectory=/usr/local/src/ubuntu-archive-tools
+ExecStart=/usr/local/src/ubuntu-archive-tools/package-subscribers -q -o /home/ubuntu/package-team-mapping.json.new
 ExecStart=mv /home/ubuntu/package-team-mapping.json.new /srv/staticreports/www/package-team-mapping.json
