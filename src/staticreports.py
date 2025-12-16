@@ -166,12 +166,12 @@ class StaticReports:
         Path("/etc/nginx/sites-enabled/default").unlink(missing_ok=True)
 
     def start(self):
-        """Restart all services of the Ubuntu static reports."""
+        """Start all services of the Ubuntu static reports, but do not wait."""
         try:
             systemd.service_restart("nginx")
             logger.debug("Nginx service restarted")
             for service in UBUNTU_STATIC_REPORT_SERVICES:
-                systemd.service_start(service + ".service")
+                systemd.service_start(service + ".service", "--no-block")
                 logger.debug(f"{service} service started")
         except CalledProcessError as e:
             logger.error("Failed to start systemd services: %s", e)
@@ -182,7 +182,7 @@ class StaticReports:
         logger.debug("The url in use is %s", url)
 
     def refresh_report(self):
-        """Refresh all the reports."""
+        """Refresh all the reports - wait for completion."""
         try:
             for service in UBUNTU_STATIC_REPORT_SERVICES:
                 systemd.service_start(service + ".service")
