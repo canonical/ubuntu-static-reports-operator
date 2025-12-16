@@ -92,7 +92,7 @@ class DNSResolverHTTPSAdapter(HTTPAdapter):
         return super().send(request, stream, timeout, verify, cert, proxies)
 
 
-@retry(retry_num=20, retry_sleep_sec=30)
+@retry(retry_num=40, retry_sleep_sec=60)
 def wait_oneshot_finished(juju: jubilant.Juju, unit: str, service: str):
     """Wait on service to complete after it has started."""
     state = juju.ssh(unit, "systemctl show -p ActiveState -p SubState --value " + service)

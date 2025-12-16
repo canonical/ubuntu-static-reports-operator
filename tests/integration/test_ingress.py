@@ -82,3 +82,33 @@ def test_content_update_seeds(juju: jubilant.Juju):
         startswith="Task-Section: server",
         contains="ubuntu-server",
     )
+
+
+def test_content_package_subscribers(juju: jubilant.Juju):
+    """Check the response of package-subscribers."""
+    check_content(
+        juju,
+        path="TODO-web-path",
+        startswith="TODO content at the beginning",
+        contains="TODO-something-later",
+    )
+
+
+def test_content_permissions_report(juju: jubilant.Juju):
+    """Check the response of permissions-report."""
+    check_content(
+        juju,
+        path="TODO-web-path",
+        startswith="TODO content at the beginning",
+        contains="TODO-something-later",
+    )
+
+
+def test_content_packageset_report(juju: jubilant.Juju):
+    """Check the response of packageset-report."""
+    check_content(
+        juju,
+        path="TODO-web-path",
+        startswith="TODO content at the beginning",
+        contains="TODO-something-later",
+    )
