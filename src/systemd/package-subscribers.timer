@@ -1,0 +1,10 @@
+[Unit]
+Description=Ubuntu Static Reports - Update Package Subscribers web view
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=6h
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

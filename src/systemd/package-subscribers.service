@@ -1,0 +1,18 @@
+[Unit]
+Description=Ubuntu Static Reports - Package Subscribers web view
+
+[Service]
+Type=oneshot
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+ExecStart=package-subscribers -q -o /home/ubuntu/package-team-mapping.json.new
+ExecStart=mv /home/ubuntu/package-team-mapping.json.new /srv/staticreports/www/package-team-mapping.json

@@ -1,5 +1,5 @@
 [Unit]
-Description=Ubuntu Static Reports - Update Seeds Web view
+Description=Ubuntu Static Reports - Seeds Web view
 
 [Service]
 Type=oneshot

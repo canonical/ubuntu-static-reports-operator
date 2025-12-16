@@ -1,9 +1,9 @@
 [Unit]
-Description=Ubuntu Static Reports - Sync Blocklist Web view
+Description=Ubuntu Static Reports - Update Package Set Report
 
 [Service]
 Type=oneshot
-Environment="DESTINATION=/srv/staticreports/www/sync-blocklist.txt"
+Environment="WORKDIR=/srv/staticreports/www/packagesets"
 
 User=ubuntu
 KeyringMode=private
@@ -15,4 +15,5 @@ ProtectKernelModules=yes
 ProtectKernelTunables=yes
 RestrictSUIDSGID=yes
 
-ExecStart=update-sync-blocklist
+ExecStartPre=mkdir -p ${WORKDIR}
+ExecStart=packageset-report ${WORKDIR}
