@@ -110,10 +110,10 @@ def test_start_success_and_failure(monkeypatch):
     calls = []
 
     monkeypatch.setattr(
-        staticreports.systemd, "service_restart", lambda name: calls.append(("restart", name))
+        staticreports.systemd, "service_restart", lambda *args: calls.append(("restart",) + args)
     )
     monkeypatch.setattr(
-        staticreports.systemd, "service_start", lambda name: calls.append(("start", name))
+        staticreports.systemd, "service_start", lambda *args: calls.append(("start",) + args)
     )
 
     sr = staticreports.StaticReports()
@@ -121,10 +121,15 @@ def test_start_success_and_failure(monkeypatch):
 
     assert ("restart", "nginx") in calls
     for svc in staticreports.UBUNTU_STATIC_REPORT_SERVICES:
-        assert ("start", svc + ".service") in calls
+        # ensure we call service_start with the unit and the --no-block flag
+        assert any(
+            call
+            for call in calls
+            if call[0] == "start" and svc + ".service" in call and "--no-block" in call
+        )
 
     # now make service_start raise
-    def bad_start(name):
+    def bad_start(*args):
         raise CalledProcessError(1, "systemctl")
 
     monkeypatch.setattr(staticreports.systemd, "service_start", bad_start)
@@ -134,15 +139,16 @@ def test_start_success_and_failure(monkeypatch):
 
 def test_refresh_report_success_and_failure(monkeypatch):
     starts = []
-    monkeypatch.setattr(staticreports.systemd, "service_start", lambda name: starts.append(name))
+    monkeypatch.setattr(staticreports.systemd, "service_start", lambda *args: starts.append(args))
 
     sr = staticreports.StaticReports()
     sr.refresh_report()
     for svc in staticreports.UBUNTU_STATIC_REPORT_SERVICES:
-        assert svc + ".service" in starts
+        # refresh_report may or may not use --no-block; accept either form
+        assert any(call for call in starts if svc + ".service" in call)
 
     # failure case
-    def bad_start(name):
+    def bad_start(*args):
         raise CalledProcessError(2, "systemctl")
 
     monkeypatch.setattr(staticreports.systemd, "service_start", bad_start)
