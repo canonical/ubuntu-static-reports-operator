@@ -47,3 +47,12 @@ requires:
     interface: ingress
     limit: 1
     optional: true
+
+config:
+  options:
+    lpuser_secret_id:
+      description: |
+        The secret ID for a vault containing the Launchpad oauth token
+        under ky lpoauthkey, to be used for services that need
+        authenticated users.
+      type: secret

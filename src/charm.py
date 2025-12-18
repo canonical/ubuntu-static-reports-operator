@@ -41,6 +41,36 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
 
         self._staticreports = StaticReports()
 
+    @property
+    def _lpuser_secret(self) -> ops.model.Secret | None:
+        secret_id: str = ""
+
+        try:
+            secret_id = str(self.config["lpuser_secret_id"])
+        except KeyError:
+            logger.warning("lpuser_secret_id config not available, unable to extract keys.")
+            return None
+
+        try:
+            return self.model.get_secret(id=secret_id)
+        except (ops.SecretNotFoundError, ops.model.ModelError):
+            logger.warning("Failed to get lpuser secret with id %s", secret_id)
+
+        return None
+
+    @property
+    def _lpuser_lp_oauthkey(self) -> str | None:
+        secret = self._lpuser_secret
+
+        if secret is not None:
+            logger.debug("config - got secret id %s, returning key lpoauthkey", secret)
+            try:
+                return secret.get_content(refresh=True)["lpoauthkey"]
+            except KeyError:
+                logger.warning("lpoauthkey not found in lpuser secret.")
+
+        return None
+
     def _on_install(self, event: ops.EventBase):
         """Handle install, upgrade, config-changed, or ingress events."""
         self.unit.status = ops.MaintenanceStatus("Setting up environment")
@@ -76,14 +106,29 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
 
     def _on_config_changed(self, event):
         """Update configuration."""
+        logger.debug("config changed event")
         self.unit.status = ops.MaintenanceStatus("Updating configuration")
         try:
-            self._staticreports.configure(self._get_external_url())
+            self._staticreports.configure_url(self._get_external_url())
         except ValueError:
             self.unit.status = ops.BlockedStatus(
                 "Invalid configuration. Check `juju debug-log` for details."
             )
-            return
+            return False
+        logger.debug("config change done - url set")
+
+        lp_key_data = self._lpuser_lp_oauthkey
+        if lp_key_data is None:
+            logger.warning("Launchpad credentials unavailable, unable to gather uploaders.")
+            self.unit.status = ops.BlockedStatus("Launchpad oauth token config missing.")
+            return False
+        else:
+            logger.debug("config - got lpoauthkey (length %d)", len(lp_key_data))
+            if not self._staticreports.configure_lpoauthkey(lp_key_data):
+                self.unit.status = ops.BlockedStatus("Failed to update Launchpad oauth token.")
+                return False
+        logger.debug("config change done - lp oauth key set")
+
         self.unit.status = ops.ActiveStatus()
 
     def _on_refresh_report(self, event: ops.ActionEvent):

@@ -7,12 +7,14 @@ These tests mock external side-effects (apt, systemd, os, shutil, and
 pathlib writes) so they can run as unit tests without touching the host.
 """
 
+from pathlib import Path
 from subprocess import CalledProcessError
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
 import staticreports
+from staticreports import StaticReports
 
 
 def test__install_packages_success(monkeypatch):
@@ -253,7 +255,7 @@ def test_configure_logs_url(caplog):
     sr = staticreports.StaticReports()
     caplog.clear()
     with caplog.at_level("DEBUG"):
-        sr.configure("http://example.local:80")
+        sr.configure_url("http://example.local:80")
     assert "The url in use is http://example.local:80" in caplog.text
 
 
@@ -351,3 +353,47 @@ def test_install_git_clone_failure_raises(monkeypatch):
     sr = staticreports.StaticReports()
     with pytest.raises(CalledProcessError):
         sr.install()
+
+
+def test_staticreports_init_with_proxies(monkeypatch):
+    monkeypatch.setenv("JUJU_CHARM_HTTP_PROXY", "http://proxy.example:3128")
+    monkeypatch.setenv("JUJU_CHARM_HTTPS_PROXY", "https://secure.example:3129")
+    sr = StaticReports()
+    assert "http" in sr.proxies
+    assert "https" in sr.proxies
+    assert sr.env.get("HTTP_PROXY") == "http://proxy.example:3128"
+    assert sr.env.get("HTTPS_PROXY") == "https://secure.example:3129"
+
+
+@patch("staticreports.pathops.LocalPath")
+def test_configure_lpoauthkey_exceptions(localpathmock):
+    # parent exists but write_text raises FileNotFoundError
+    inst = localpathmock.return_value
+    inst.parent = Path("/nonexistent/home/ubuntu")
+    inst.write_text.side_effect = FileNotFoundError()
+    sr = StaticReports()
+    # avoid attempting to create /nonexistent on the test host
+    import os as _os
+
+    _os_makedirs = _os.makedirs
+    try:
+        _os.makedirs = lambda *a, **k: None
+        assert sr.configure_lpoauthkey("data") is False
+    finally:
+        _os.makedirs = _os_makedirs
+
+    # raise LookupError
+    inst.write_text.side_effect = LookupError()
+    try:
+        _os.makedirs = lambda *a, **k: None
+        assert sr.configure_lpoauthkey("data") is False
+    finally:
+        _os.makedirs = _os_makedirs
+
+    # raise PermissionError
+    inst.write_text.side_effect = PermissionError()
+    try:
+        _os.makedirs = lambda *a, **k: None
+        assert sr.configure_lpoauthkey("data") is False
+    finally:
+        _os.makedirs = _os_makedirs

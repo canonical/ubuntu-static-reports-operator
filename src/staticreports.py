@@ -11,7 +11,7 @@ from subprocess import PIPE, STDOUT, CalledProcessError, SubprocessError, run
 from urllib.parse import urlparse
 
 import charms.operator_libs_linux.v1.systemd as systemd
-from charmlibs import apt
+from charmlibs import apt, pathops
 from charmlibs.apt import PackageError, PackageNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,8 @@ UBUNTU_STATIC_REPORT_SERVICES = [
     "package-subscribers",
     "permissions-report",
 ]
+
+LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
 
 
 class StaticReports:
@@ -177,9 +179,52 @@ class StaticReports:
             logger.error("Failed to start systemd services: %s", e)
             raise
 
-    def configure(self, url: str):
-        """Configure the charm."""
-        logger.debug("The url in use is %s", url)
+    def configure_url(self, url: str):
+        """URL is defined externally - this is a no-op for now."""
+        logger.debug("configure_url: The url in use is %s", url)
+
+    def configure_lpoauthkey(self, lp_key_data: str):
+        """Create or refresh the credentials file for launchpad access.
+
+        Args:
+            user: The git-ubuntu user.
+            home_dir: The home directory for the user.
+            lp_key_data: The private credential data.
+
+        Returns:
+            True if directory and file creation succeeded, False otherwise.
+        """
+        lp_key_file = pathops.LocalPath(LP_OAUTH_KEY_PATH)
+        parent_dir = lp_key_file.parent
+        os.makedirs(parent_dir, exist_ok=True)
+
+        key_success = False
+        try:
+            lp_key_file.write_text(
+                lp_key_data,
+                mode=0o600,
+                user="ubuntu",
+                group="ubuntu",
+            )
+            key_success = True
+        except (FileNotFoundError, NotADirectoryError) as e:
+            logger.error(
+                "Failed to create lp credentials entry due to directory issues: %s", str(e)
+            )
+        except LookupError as e:
+            logger.error(
+                "Failed to create lp credentials entry due to issues with root user: %s", str(e)
+            )
+        except PermissionError as e:
+            logger.error(
+                "Failed to create lp credentials entry due to permission issues: %s", str(e)
+            )
+        logger.debug(
+            "configure_lpoauthkey: written lp oauth key (length %d) to %s",
+            len(lp_key_data),
+            lp_key_file,
+        )
+        return key_success
 
     def refresh_report(self):
         """Refresh all the reports - wait for completion."""

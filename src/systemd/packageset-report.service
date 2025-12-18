@@ -3,6 +3,8 @@ Description=Ubuntu Static Reports - Update Package Set Report
 
 [Service]
 Type=oneshot
+ConditionFileNotEmpty=/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth
+Environment="LP_CREDENTIALS_FILE=/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
 Environment="WORKDIR=/srv/staticreports/www/packagesets"
 
 User=ubuntu

@@ -8,8 +8,10 @@ and do not attempt to manipulate the underlying machine.
 """
 
 from subprocess import CalledProcessError
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
+import ops
 import pytest
 from charmlibs.apt import PackageError, PackageNotFoundError
 from ops.testing import (
@@ -91,20 +93,36 @@ def test_upgrade_failure(install_mock, exception, ctx, base_state):
     )
 
 
-@patch("charm.StaticReports.configure")
-def test_config_changed(configure_mock, ctx, base_state):
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+)
+@patch("charm.StaticReports.configure_lpoauthkey")
+@patch("charm.StaticReports.configure_url")
+def test_config_changed(configure_mock, lpoauth_mock, lp_oauth_prop_mock, ctx, base_state):
+    lp_oauth_prop_mock.return_value = "fake-token"
+    lpoauth_mock.return_value = True
     out = ctx.run(ctx.on.config_changed(), base_state)
-    assert out.unit_status == ActiveStatus("")
-    assert configure_mock.called
+    assert out.unit_status == ActiveStatus()
+    configure_mock.assert_called()
+    lpoauth_mock.assert_called()
 
 
-@patch("charm.StaticReports.configure")
-def test_config_changed_failed_bad_config(configure_mock, ctx, base_state):
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+)
+@patch("charm.StaticReports.configure_lpoauthkey")
+@patch("charm.StaticReports.configure_url")
+def test_config_changed_failed_bad_config(
+    configure_mock, lpoauth_mock, lp_oauth_prop_mock, ctx, base_state
+):
     configure_mock.side_effect = ValueError
     out = ctx.run(ctx.on.config_changed(), base_state)
     assert out.unit_status == BlockedStatus(
         "Invalid configuration. Check `juju debug-log` for details."
     )
+    assert not lpoauth_mock.called
 
 
 @patch("charm.StaticReports.start")
@@ -143,21 +161,36 @@ def test_staticreports_refresh_failure(refresh_report_mock, ctx, base_state):
     )
 
 
-@patch("charm.StaticReports.configure")
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+)
+@patch("charm.StaticReports.configure_lpoauthkey")
+@patch("charm.StaticReports.configure_url")
 @patch("charm.socket.getfqdn")
 @patch("ops.model.Model.get_binding")
-def test_get_external_url_fqdn_fallback(get_binding_mock, getfqdn_mock, configure_mock, ctx):
+def test_get_external_url_fqdn_fallback(
+    get_binding_mock, getfqdn_mock, configure_mock, lpoauth_mock, lp_oauth_prop_mock, ctx
+):
     """Test that FQDN is used when no juju-info binding and no ingress."""
     get_binding_mock.return_value = None
     getfqdn_mock.return_value = "test-host.example.com"
     state = State(leader=True)
+    lp_oauth_prop_mock.return_value = "fake-token"
+    lpoauth_mock.return_value = True
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ActiveStatus()
     configure_mock.assert_called_once_with("http://test-host.example.com:80")
+    lpoauth_mock.assert_called()
 
 
-@patch("charm.StaticReports.configure")
-def test_get_external_url_juju_info_binding(configure_mock, ctx):
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+)
+@patch("charm.StaticReports.configure_lpoauthkey")
+@patch("charm.StaticReports.configure_url")
+def test_get_external_url_juju_info_binding(configure_mock, lpoauth_mock, lp_oauth_prop_mock, ctx):
     """Test that unit IP is used when juju-info binding exists."""
     state = State(
         leader=True,
@@ -168,13 +201,21 @@ def test_get_external_url_juju_info_binding(configure_mock, ctx):
             ),
         },
     )
+    lp_oauth_prop_mock.return_value = "fake-token"
+    lpoauth_mock.return_value = True
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ActiveStatus()
     configure_mock.assert_called_once_with("http://192.168.1.10:80")
+    lpoauth_mock.assert_called()
 
 
-@patch("charm.StaticReports.configure")
-def test_get_external_url_ingress_url(configure_mock, ctx):
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+)
+@patch("charm.StaticReports.configure_lpoauthkey")
+@patch("charm.StaticReports.configure_url")
+def test_get_external_url_ingress_url(configure_mock, lpoauth_mock, lp_oauth_prop_mock, ctx):
     """Test that ingress URL takes priority when available."""
     ingress_relation = Relation(
         endpoint="ingress",
@@ -192,6 +233,48 @@ def test_get_external_url_ingress_url(configure_mock, ctx):
         },
         relations={ingress_relation},
     )
+    lp_oauth_prop_mock.return_value = "fake-token"
+    lpoauth_mock.return_value = True
     out = ctx.run(ctx.on.config_changed(), state)
     assert out.unit_status == ActiveStatus()
     configure_mock.assert_called_once_with("https://ingress.example.com/")
+    lpoauth_mock.assert_called()
+
+
+def test_config_changed_lp_secret_not_found(ctx, base_state):
+    """If the lp secret is not configured the unit should be blocked."""
+    out = ctx.run(ctx.on.config_changed(), base_state)
+    assert out.unit_status == BlockedStatus("Launchpad oauth token config missing.")
+
+
+@patch("charm.StaticReports.configure_lpoauthkey")
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+)
+def test_config_changed_lpoauthkey_failure(lp_oauth_prop_mock, configure_lpoauth_mock, ctx):
+    """If configure_lpoauthkey fails the unit should be blocked."""
+    lp_oauth_prop_mock.return_value = "fake-token"
+    configure_lpoauth_mock.return_value = False
+    out = ctx.run(ctx.on.config_changed(), State(leader=True))
+    assert out.unit_status == BlockedStatus("Failed to update Launchpad oauth token.")
+
+
+def test_lpuser_secret_get_secret_raises():
+    """When Model.get_secret raises, _lpuser_secret should handle it."""
+    dummy = SimpleNamespace()
+    dummy.config = {"lpuser_secret_id": "missing"}
+    dummy.model = MagicMock()
+    dummy.model.get_secret.side_effect = ops.SecretNotFoundError
+    result = UbuntuStaticReportsCharm._lpuser_secret.fget(dummy)
+    assert result is None
+
+
+def test_lpuser_lp_oauthkey_keyerror():
+    """When secret.get_content is missing lpoauthkey, property handles KeyError."""
+    dummy = SimpleNamespace()
+    fake_secret = MagicMock()
+    fake_secret.get_content.return_value = {}
+    dummy._lpuser_secret = fake_secret
+    result = UbuntuStaticReportsCharm._lpuser_lp_oauthkey.fget(dummy)
+    assert result is None
