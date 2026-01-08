@@ -1,9 +1,9 @@
 [Unit]
 Description=Ubuntu Static Reports - Permissions Report web view
+ConditionFileNotEmpty=/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth
 
 [Service]
 Type=oneshot
-ConditionFileNotEmpty=/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth
 Environment="LP_CREDENTIALS_FILE=/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
 Environment="WORKDIR=/srv/staticreports/www/archive-permissions"
 
