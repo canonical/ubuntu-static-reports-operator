@@ -36,8 +36,8 @@ def lpuser_secret(juju):
 
 
 @fixture(scope="module")
-def ubuntu_static_reports_charm(request, juju, lpuser_secret):
-    """Deploy ubuntu-static-reports charm with optional secret configuration."""
+def ubuntu_static_reports_charm(request):
+    """Build or return path to ubuntu-static-reports charm file."""
     charm_file = request.config.getoption("--charm-path")
     if not charm_file:
         working_dir = os.getenv("SPREAD_PATH", Path("."))
@@ -52,10 +52,5 @@ def ubuntu_static_reports_charm(request, juju, lpuser_secret):
         )
 
         charm_file = next(Path.glob(Path(working_dir), "*.charm")).absolute()
-
-    juju.deploy(charm_file, app="ubuntu-static-reports")
-
-    if lpuser_secret:
-        juju.config("ubuntu-static-reports", {"lpuser_secret_id": lpuser_secret})
 
     return charm_file

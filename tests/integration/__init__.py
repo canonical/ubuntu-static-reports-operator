@@ -92,6 +92,11 @@ class DNSResolverHTTPSAdapter(HTTPAdapter):
         return super().send(request, stream, timeout, verify, cert, proxies)
 
 
+def address(juju: jubilant.Juju, app: str = APPNAME):
+    """Report the IP address of the application."""
+    return juju.status().apps[app].units[f"{app}/0"].public_address
+
+
 @retry(retry_num=80, retry_sleep_sec=120)
 def wait_oneshot_finished(juju: jubilant.Juju, unit: str, service: str):
     """Wait on service to complete after it has started."""
