@@ -201,6 +201,60 @@ def test_setup_systemd_unit_writes_service_and_timer_with_proxy_environment(monk
     assert enabled and enabled[0][0] == "--now"
 
 
+def test_setup_systemd_unit_writes_rsync_proxy_environment_variable(monkeypatch):
+    """When HTTP proxy is configured, rsync proxy should also be injected into systemd units."""
+    monkeypatch.setenv("JUJU_CHARM_HTTP_PROXY", "http://proxy.example:8080")
+
+    sr = staticreports.StaticReports()
+
+    def fake_read_text(self):
+        return "[Service]\nExecStart=/bin/true" if self.suffix == ".service" else "[Timer]"
+
+    written = {}
+
+    def fake_write_text(self, text):
+        written[str(self)] = text
+
+    monkeypatch.setattr(staticreports.Path, "read_text", fake_read_text)
+    monkeypatch.setattr(staticreports.Path, "write_text", fake_write_text)
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=False, exist_ok=False: None
+    )
+    monkeypatch.setattr(staticreports.systemd, "service_enable", lambda *args, **kwargs: None)
+
+    sr.setup_systemd_unit("update-seeds")
+
+    svc_path = "/etc/systemd/system/update-seeds.service"
+    assert "Environment=RSYNC_PROXY=proxy.example:8080" in written[svc_path]
+
+
+def test_setup_systemd_unit_without_proxy_environment_variables(monkeypatch):
+    """When no proxy is configured, no proxy environment variables should be injected."""
+    sr = staticreports.StaticReports()
+
+    def fake_read_text(self):
+        return "[Service]\nExecStart=/bin/true" if self.suffix == ".service" else "[Timer]"
+
+    written = {}
+
+    def fake_write_text(self, text):
+        written[str(self)] = text
+
+    monkeypatch.setattr(staticreports.Path, "read_text", fake_read_text)
+    monkeypatch.setattr(staticreports.Path, "write_text", fake_write_text)
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=False, exist_ok=False: None
+    )
+    monkeypatch.setattr(staticreports.systemd, "service_enable", lambda *args, **kwargs: None)
+
+    sr.setup_systemd_unit("update-seeds")
+
+    svc_path = "/etc/systemd/system/update-seeds.service"
+    assert "Environment=HTTP_PROXY" not in written[svc_path]
+    assert "Environment=HTTPS_PROXY" not in written[svc_path]
+    assert "Environment=RSYNC_PROXY" not in written[svc_path]
+
+
 def test_setup_systemd_units_configures_all_report_services(monkeypatch):
     called = []
     monkeypatch.setattr(
