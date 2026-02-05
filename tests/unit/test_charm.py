@@ -9,7 +9,7 @@ and do not attempt to manipulate the underlying machine.
 
 from subprocess import CalledProcessError
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import ops
 import pytest
@@ -95,7 +95,7 @@ def test_upgrade_failure(install_mock, exception, ctx, base_state):
 
 @patch(
     "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
-    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+    new_callable=PropertyMock,
 )
 @patch("charm.StaticReports.configure_lpoauthkey")
 @patch("charm.StaticReports.configure_url")
@@ -110,7 +110,7 @@ def test_config_changed(configure_mock, lpoauth_mock, lp_oauth_prop_mock, ctx, b
 
 @patch(
     "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
-    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+    new_callable=PropertyMock,
 )
 @patch("charm.StaticReports.configure_lpoauthkey")
 @patch("charm.StaticReports.configure_url")
@@ -163,7 +163,7 @@ def test_staticreports_refresh_failure(refresh_report_mock, ctx, base_state):
 
 @patch(
     "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
-    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+    new_callable=PropertyMock,
 )
 @patch("charm.StaticReports.configure_lpoauthkey")
 @patch("charm.StaticReports.configure_url")
@@ -186,7 +186,7 @@ def test_get_external_url_fqdn_fallback(
 
 @patch(
     "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
-    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+    new_callable=PropertyMock,
 )
 @patch("charm.StaticReports.configure_lpoauthkey")
 @patch("charm.StaticReports.configure_url")
@@ -211,7 +211,7 @@ def test_get_external_url_juju_info_binding(configure_mock, lpoauth_mock, lp_oau
 
 @patch(
     "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
-    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+    new_callable=PropertyMock,
 )
 @patch("charm.StaticReports.configure_lpoauthkey")
 @patch("charm.StaticReports.configure_url")
@@ -250,7 +250,7 @@ def test_config_changed_lp_secret_not_found(ctx, base_state):
 @patch("charm.StaticReports.configure_lpoauthkey")
 @patch(
     "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
-    new_callable=lambda: __import__("unittest.mock").mock.PropertyMock,
+    new_callable=PropertyMock,
 )
 def test_config_changed_lpoauthkey_failure(lp_oauth_prop_mock, configure_lpoauth_mock, ctx):
     """If configure_lpoauthkey fails the unit should be blocked."""

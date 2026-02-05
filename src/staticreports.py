@@ -83,15 +83,15 @@ class StaticReports:
             logger.error("Failed to update package cache: %s", e)
             raise
 
-        for p in PACKAGES:
+        for package in PACKAGES:
             try:
-                apt.add_package(p)
-                logger.debug("Package %s installed", p)
+                apt.add_package(package)
+                logger.debug("Package %s installed", package)
             except PackageNotFoundError:
-                logger.error("Failed to find package %s in package cache", p)
+                logger.error("Failed to find package %s in package cache", package)
                 raise
             except PackageError as e:
-                logger.error("Failed to install %s: %s", p, e)
+                logger.error("Failed to install %s: %s", package, e)
                 raise
 
     def install(self):
@@ -100,30 +100,30 @@ class StaticReports:
         self._install_packages()
 
         logger.info("Create the required directories")
-        for dname, duser, dgroup in SRV_DIRS:
+        for dir_path, dir_user, dir_group in SRV_DIRS:
             try:
-                os.makedirs(dname, exist_ok=True)
-                logger.debug("Directory %s created", dname)
-                if duser is not None:
-                    logger.debug("Ownership of directory %s set", dname)
-                    shutil.chown(dname, duser, dgroup)
+                os.makedirs(dir_path, exist_ok=True)
+                logger.debug("Directory %s created", dir_path)
+                if dir_user is not None:
+                    logger.debug("Ownership of directory %s set", dir_path)
+                    shutil.chown(dir_path, dir_user, dir_group)
             except OSError as e:
-                logger.warning("Creating directory %s failed: %s", dname, e)
+                logger.warning("Creating directory %s failed: %s", dir_path, e)
                 raise
 
         logger.info("Updating repositories")
-        for rurl, rbranch, rtarget in REPO_URLS:
-            logger.debug(f"Handle repository {rurl}")
+        for repo_url, repo_branch, repo_target in REPO_URLS:
+            logger.debug(f"Handle repository {repo_url}")
             try:
-                if not rtarget.is_dir():
+                if not repo_target.is_dir():
                     run(
                         [
                             "git",
                             "clone",
                             "-b",
-                            rbranch,
-                            rurl,
-                            rtarget,
+                            repo_branch,
+                            repo_url,
+                            repo_target,
                         ],
                         check=True,
                         env=self.env,
@@ -137,9 +137,9 @@ class StaticReports:
                         [
                             "git",
                             "pull",
-                            rbranch,
+                            repo_branch,
                         ],
-                        cwd=rtarget,
+                        cwd=repo_target,
                         check=True,
                         env=self.env,
                         stdout=PIPE,
@@ -148,7 +148,7 @@ class StaticReports:
                         timeout=300,
                     )
             except (CalledProcessError, SubprocessError, FileNotFoundError) as e:
-                logger.warning("Git handling {rurl} failed: %s", e.stdout)
+                logger.warning("Git handling {repo_url} failed: %s", e.stdout)
                 raise
 
         logger.info("Installing App and Config files")
@@ -236,22 +236,22 @@ class StaticReports:
         systemd_unit_location.mkdir(parents=True, exist_ok=True)
 
         systemd_service = Path(f"src/systemd/{service}.service")
-        service_txt = systemd_service.read_text()
+        service_content = systemd_service.read_text()
 
         systemd_timer = Path(f"src/systemd/{service}.timer")
-        timer_txt = systemd_timer.read_text()
+        timer_content = systemd_timer.read_text()
 
-        systemd_proxy = ""
+        proxy_env_vars = ""
         if "http" in self.proxies:
-            systemd_proxy += "\nEnvironment=HTTP_PROXY=" + self.proxies["http"]
+            proxy_env_vars += "\nEnvironment=HTTP_PROXY=" + self.proxies["http"]
         if "https" in self.proxies:
-            systemd_proxy += "\nEnvironment=HTTPS_PROXY=" + self.proxies["https"]
+            proxy_env_vars += "\nEnvironment=HTTPS_PROXY=" + self.proxies["https"]
         if "rsync" in self.proxies:
-            systemd_proxy += "\nEnvironment=RSYNC_PROXY=" + self.proxies["rsync"]
+            proxy_env_vars += "\nEnvironment=RSYNC_PROXY=" + self.proxies["rsync"]
 
-        service_txt += systemd_proxy
-        (systemd_unit_location / f"{service}.service").write_text(service_txt)
-        (systemd_unit_location / f"{service}.timer").write_text(timer_txt)
+        service_content += proxy_env_vars
+        (systemd_unit_location / f"{service}.service").write_text(service_content)
+        (systemd_unit_location / f"{service}.timer").write_text(timer_content)
         logger.debug(f"Systemd units for {service} created")
 
         try:

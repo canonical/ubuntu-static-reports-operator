@@ -55,7 +55,7 @@ def test_install_creates_dirs_and_copies(monkeypatch):
     ops = []
 
     monkeypatch.setattr(
-        staticreports.os, "makedirs", lambda dname, exist_ok=True: ops.append(("makedirs", dname))
+        staticreports.os, "makedirs", lambda dir_path, exist_ok=True: ops.append(("makedirs", dir_path))
     )
     monkeypatch.setattr(
         staticreports.shutil, "chown", lambda path, u, g: ops.append(("chown", path, u, g))
@@ -72,10 +72,10 @@ def test_install_creates_dirs_and_copies(monkeypatch):
     sr = staticreports.StaticReports()
     sr.install()
 
-    for dname, duser, dgroup in staticreports.SRV_DIRS:
-        assert ("makedirs", dname) in ops
-        if duser is not None:
-            assert ("chown", dname, duser, dgroup) in ops
+    for dir_path, dir_user, dir_group in staticreports.SRV_DIRS:
+        assert ("makedirs", dir_path) in ops
+        if dir_user is not None:
+            assert ("chown", dir_path, dir_user, dir_group) in ops
 
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
@@ -86,7 +86,7 @@ def test_install_creates_dirs_and_copies(monkeypatch):
 
 def test_install_copy_failure_propagates(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
-    monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
 
     monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
@@ -224,7 +224,7 @@ def test__install_packages_package_error(monkeypatch):
 def test_install_directory_creation_failure(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
 
-    def boom(dname, exist_ok=True):
+    def boom(dir_path, exist_ok=True):
         raise OSError("no space")
 
     monkeypatch.setattr(staticreports.os, "makedirs", boom)
