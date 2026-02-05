@@ -16,7 +16,6 @@ from charmlibs.apt import PackageError, PackageNotFoundError
 
 logger = logging.getLogger(__name__)
 
-# Packages installed as part of the install/update process.
 PACKAGES = [
     "git",
     "nginx-light",
@@ -24,7 +23,6 @@ PACKAGES = [
     "python3-keyring",
 ]
 
-# Directories and ownership as needed for the services to run
 SRV_DIRS = [
     (Path("/srv/staticreports/www"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/seeds"), "ubuntu", "ubuntu"),
@@ -33,7 +31,6 @@ SRV_DIRS = [
     (Path("/usr/local/src"), None, None),
 ]
 
-# repo-url, branch and target directory
 REPO_URLS = [
     (
         "https://git.launchpad.net/ubuntu-archive-tools",
@@ -187,8 +184,6 @@ class StaticReports:
         """Create or refresh the credentials file for launchpad access.
 
         Args:
-            user: The git-ubuntu user.
-            home_dir: The home directory for the user.
             lp_key_data: The private credential data.
 
         Returns:

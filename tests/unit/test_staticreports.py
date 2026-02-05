@@ -32,7 +32,6 @@ def test__install_packages_success(monkeypatch):
     sr = staticreports.StaticReports()
     sr._install_packages()
 
-    # first call is update, then all packages were requested
     assert called[0] == "update"
     assert set(called[1:]) == set(staticreports.PACKAGES)
 
@@ -48,10 +47,8 @@ def test__install_packages_update_fails(monkeypatch):
 
 
 def test_install_creates_dirs_and_copies(monkeypatch):
-    # avoid performing package operations
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
 
-    # avoid invoking real git during this test; record calls
     run_mock = Mock()
     monkeypatch.setattr(staticreports, "run", run_mock)
 
@@ -75,18 +72,15 @@ def test_install_creates_dirs_and_copies(monkeypatch):
     sr = staticreports.StaticReports()
     sr.install()
 
-    # directories created and chown called
     for dname, duser, dgroup in staticreports.SRV_DIRS:
         assert ("makedirs", dname) in ops
         if duser is not None:
             assert ("chown", dname, duser, dgroup) in ops
 
-    # files copied (script files and nginx config)
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
     assert ("copy", "src/nginx/staticreports.conf", staticreports.NGINX_SITE_CONFIG_PATH) in ops
 
-    # ensure git/repo handling was invoked
     assert run_mock.called
 
 
@@ -95,7 +89,6 @@ def test_install_copy_failure_propagates(monkeypatch):
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
 
-    # avoid invoking real git during this test
     monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
 
     def bad_copy(src, dst):
@@ -123,14 +116,12 @@ def test_start_success_and_failure(monkeypatch):
 
     assert ("restart", "nginx") in calls
     for svc in staticreports.UBUNTU_STATIC_REPORT_SERVICES:
-        # ensure we call service_start with the unit and the --no-block flag
         assert any(
             call
             for call in calls
             if call[0] == "start" and svc + ".service" in call and "--no-block" in call
         )
 
-    # now make service_start raise
     def bad_start(*args):
         raise CalledProcessError(1, "systemctl")
 
@@ -146,10 +137,8 @@ def test_refresh_report_success_and_failure(monkeypatch):
     sr = staticreports.StaticReports()
     sr.refresh_report()
     for svc in staticreports.UBUNTU_STATIC_REPORT_SERVICES:
-        # refresh_report may or may not use --no-block; accept either form
         assert any(call for call in starts if svc + ".service" in call)
 
-    # failure case
     def bad_start(*args):
         raise CalledProcessError(2, "systemctl")
 
@@ -159,13 +148,11 @@ def test_refresh_report_success_and_failure(monkeypatch):
 
 
 def test_setup_systemd_unit_writes_units_and_enables(monkeypatch):
-    # simulate proxies coming from environment
     monkeypatch.setenv("JUJU_CHARM_HTTP_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("JUJU_CHARM_HTTPS_PROXY", "https://secure.example:8443")
 
     sr = staticreports.StaticReports()
 
-    # return different content depending on suffix
     def fake_read_text(self):
         return "[Service]\nExecStart=/bin/true" if self.suffix == ".service" else "[Timer]"
 
@@ -193,7 +180,6 @@ def test_setup_systemd_unit_writes_units_and_enables(monkeypatch):
     timer_path = "/etc/systemd/system/update-seeds.timer"
     assert svc_path in written
     assert timer_path in written
-    # ensure proxy Environment lines were appended
     assert "Environment=HTTP_PROXY=http://proxy.example:8080" in written[svc_path]
     assert "Environment=HTTPS_PROXY=https://secure.example:8443" in written[svc_path]
     assert enabled and enabled[0][0] == "--now"
@@ -210,7 +196,6 @@ def test_setup_systemd_units_calls_each(monkeypatch):
 
 
 def test__install_packages_package_not_found(monkeypatch):
-    # make update succeed but adding package raise PackageNotFoundError
     monkeypatch.setattr(staticreports.apt, "update", lambda: None)
 
     def bad_add(pkg):
@@ -237,10 +222,8 @@ def test__install_packages_package_error(monkeypatch):
 
 
 def test_install_directory_creation_failure(monkeypatch):
-    # ensure package install is skipped
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
 
-    # make os.makedirs raise OSError
     def boom(dname, exist_ok=True):
         raise OSError("no space")
 
@@ -260,14 +243,12 @@ def test_configure_logs_url(caplog):
 
 
 def test_setup_systemd_unit_enable_failure(monkeypatch):
-    # prepare minimal read_text/write_text to avoid file IO
     monkeypatch.setattr(staticreports.Path, "read_text", lambda self: "[Service]")
     monkeypatch.setattr(staticreports.Path, "write_text", lambda self, t: None)
     monkeypatch.setattr(
         staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
     )
 
-    # set proxies so proxy lines are built
     monkeypatch.setenv("JUJU_CHARM_HTTP_PROXY", "http://p:1")
 
     def bad_enable(*args, **kwargs):
@@ -281,7 +262,6 @@ def test_setup_systemd_unit_enable_failure(monkeypatch):
 
 
 def test_refresh_report_logs_stdout_on_failure(monkeypatch, caplog):
-    # raise CalledProcessError with stdout set to verify logging
     def bad_start(name):
         e = CalledProcessError(5, "systemctl")
         # CalledProcessError in this environment doesn't accept `stdout=` kwarg;
@@ -299,7 +279,6 @@ def test_refresh_report_logs_stdout_on_failure(monkeypatch, caplog):
 
 
 def test_install_triggers_git_clone_and_copies(monkeypatch, tmp_path):
-    # Ensure install doesn't touch system dirs
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
 
@@ -308,7 +287,6 @@ def test_install_triggers_git_clone_and_copies(monkeypatch, tmp_path):
         staticreports.shutil, "copy", lambda src, dst: ops.append(("copy", str(src), str(dst)))
     )
 
-    # Use tmp_path for the repository target to avoid touching project tree
     repo_target = tmp_path / "ubuntu-archive-tools"
     monkeypatch.setattr(
         staticreports,
@@ -319,19 +297,16 @@ def test_install_triggers_git_clone_and_copies(monkeypatch, tmp_path):
     run_calls = []
 
     def fake_run(cmd, **kwargs):
-        # record the command that would be executed (no filesystem changes)
         run_calls.append(cmd)
         return Mock()
 
     monkeypatch.setattr(staticreports, "run", fake_run)
 
-    # avoid package installs
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
 
     sr = staticreports.StaticReports()
     sr.install()
 
-    # verify a git clone was requested and the target equals our tmp_path target
     assert any(
         isinstance(cmd, (list, tuple)) and "clone" in cmd and cmd[-1] == repo_target
         for cmd in run_calls
@@ -339,11 +314,9 @@ def test_install_triggers_git_clone_and_copies(monkeypatch, tmp_path):
 
 
 def test_install_git_clone_failure_raises(monkeypatch):
-    # Ensure install doesn't touch system dirs
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
 
-    # Make run raise to simulate git failure
     def bad_run(cmd, **kwargs):
         raise CalledProcessError(2, "git")
 
@@ -367,12 +340,10 @@ def test_staticreports_init_with_proxies(monkeypatch):
 
 @patch("staticreports.pathops.LocalPath")
 def test_configure_lpoauthkey_exceptions(localpathmock):
-    # parent exists but write_text raises FileNotFoundError
     inst = localpathmock.return_value
     inst.parent = Path("/nonexistent/home/ubuntu")
     inst.write_text.side_effect = FileNotFoundError()
     sr = StaticReports()
-    # avoid attempting to create /nonexistent on the test host
     import os as _os
 
     _os_makedirs = _os.makedirs
@@ -382,7 +353,6 @@ def test_configure_lpoauthkey_exceptions(localpathmock):
     finally:
         _os.makedirs = _os_makedirs
 
-    # raise LookupError
     inst.write_text.side_effect = LookupError()
     try:
         _os.makedirs = lambda *a, **k: None
@@ -390,7 +360,6 @@ def test_configure_lpoauthkey_exceptions(localpathmock):
     finally:
         _os.makedirs = _os_makedirs
 
-    # raise PermissionError
     inst.write_text.side_effect = PermissionError()
     try:
         _os.makedirs = lambda *a, **k: None

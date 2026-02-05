@@ -34,8 +34,6 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.refresh_action, self._on_refresh_report)
 
-        # Ingress URL changes require updating the configuration and also regenerating sitemaps,
-        # therefore we can bind events for this relation to the config_changed event.
         framework.observe(self.ingress.on.ready, self._on_config_changed)
         framework.observe(self.ingress.on.revoked, self._on_config_changed)
 
@@ -148,13 +146,10 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
 
     def _get_external_url(self) -> str:
         """Report URL to access Ubuntu Static Reports."""
-        # Default: FQDN
         external_url = f"http://{socket.getfqdn()}:{PORT}"
-        # If can connect to juju-info, get unit IP
         if binding := self.model.get_binding("juju-info"):
             unit_ip = str(binding.network.bind_address)
             external_url = f"http://{unit_ip}:{PORT}"
-        # If ingress is set, get ingress url
         if self.ingress.url:
             external_url = self.ingress.url
         return external_url
