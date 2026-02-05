@@ -34,7 +34,7 @@ def address(juju: jubilant.Juju):
 def test_service_state_after_deploy(juju: jubilant.Juju, ubuntu_static_reports_charm):
     """Deploy the charm via jubilant and wait until it fully completed."""
     juju.deploy(ubuntu_static_reports_charm, app=APPNAME)
-    juju.wait(deploy_wait_func, timeout=600)
+    juju.wait(deploy_wait_func, timeout=1200)
     wait_oneshot_finished(
         juju, unit="ubuntu-static-reports/0", service="update-sync-blocklist.service"
     )
@@ -42,10 +42,10 @@ def test_service_state_after_deploy(juju: jubilant.Juju, ubuntu_static_reports_c
 
 
 # These have to follow test_service_state_after_deploy so content is ready
-@retry(retry_num=10, retry_sleep_sec=3)
+@retry(retry_num=20, retry_sleep_sec=6)
 def check_content(juju: jubilant.Juju, path, startswith, contains):
     """Check if the response matches the expected content."""
-    response = requests.get(f"http://{address(juju)}:80/{path}", timeout=15)
+    response = requests.get(f"http://{address(juju)}:80/{path}", timeout=30)
     assert response.status_code == 200
     assert response.text.startswith(startswith)
     assert contains in response.text

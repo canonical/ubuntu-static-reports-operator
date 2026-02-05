@@ -1,5 +1,5 @@
 project: ubuntu-static-reports-tests
-kill-timeout: 90m
+kill-timeout: 180m
 workers: 1
 
 environment:

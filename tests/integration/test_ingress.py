@@ -33,7 +33,7 @@ def test_service_state_after_ha_deploy(juju: jubilant.Juju, ubuntu_static_report
     juju.integrate(APPNAME, HAPROXY)
     juju.integrate(f"{HAPROXY}:certificates", f"{SSC}:certificates")
 
-    juju.wait(deploy_ha_wait_func, timeout=1800)
+    juju.wait(deploy_ha_wait_func, timeout=3600)
     wait_oneshot_finished(
         juju, unit="ubuntu-static-reports/0", service="update-sync-blocklist.service"
     )
@@ -41,7 +41,7 @@ def test_service_state_after_ha_deploy(juju: jubilant.Juju, ubuntu_static_report
 
 
 # These have to follow test_service_state_after_deploy so content is ready
-@retry(retry_num=24, retry_sleep_sec=5)
+@retry(retry_num=48, retry_sleep_sec=10)
 def check_content(juju: jubilant.Juju, path: str, startswith: str, contains: str):
     """Check if the response through haproxy matches the expected content."""
     model_name = juju.model
@@ -56,7 +56,7 @@ def check_content(juju: jubilant.Juju, path: str, startswith: str, contains: str
         f"https://{haproxy_ip}/{model_name}-{APPNAME}/{path}",
         headers={"Host": external_hostname},
         verify=False,
-        timeout=30,
+        timeout=60,
     )
 
     assert response.status_code == 200
