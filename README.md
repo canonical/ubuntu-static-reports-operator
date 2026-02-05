@@ -54,7 +54,7 @@ from various sources depending on the respective service.
 
 ## Basic usage
 
-Assuming you have access to a bootstrapped [Juju](https://juju.is) controller, you can deploy the charm with:
+Assuming you have access to a bootstrapped [Juju](https://juju.is) controller, you can deploy the charm with (For details on local manual debug see [CONTRIBUTING.md](CONTRIBUTING.md)):
 
 ```bash
 ❯ juju deploy ubuntu-static-reports
@@ -137,44 +137,7 @@ Dec 16 14:57:57 juju-c5cbb1-23 systemd[1]: Finished update-sync-blocklist.servic
 
 ## Testing
 
-There are unit tests which can be run directly without influence to
-the system and dependencies handled by uv.
-
-```bash
-❯ make unit
-```
-
-Furthermore there are integration tests. Those could be run directly,
-but would the rather invasive juju setup and will via that create and
-destroy units. This can be useful to run in an already established
-virtual environment along CI.
-
-```bash
-❯ make integration
-```
-
-If instead integration tests shall be run, but with isolation.
-[Spread](https://github.com/canonical/spread/blob/master/README.md)
-is configured to create the necessary environment, setup the components needed
-and then run the integration tests in there.
-
-```bash
-❯ charmcraft.spread -v -debug -reuse
-```
-
-For development and debugging it is recommended to select an individual test
-from the list of tests, and run it with
-[`-reuse` for faster setup](https://github.com/canonical/spread/blob/master/README.md#reuse)
-and [`-debug`](https://github.com/canonical/spread/blob/master/README.md#reuse)
-to drop into a shell after an error.
-
-```bash
-❯ charmcraft.spread -list
-lxd:ubuntu-24.04:tests/spread/integration/deploy-charm:juju_3_6
-lxd:ubuntu-24.04:tests/spread/integration/ingress:juju_3_6
-lxd:ubuntu-24.04:tests/spread/unit/ubuntu-static-reports
-❯ charmcraft.spread -v -debug -reuse lxd:ubuntu-24.04:tests/spread/integration/deploy-charm:juju_3_6
-```
+For information on running tests and development workflows, see the [contribution guide](CONTRIBUTING.md).
 
 ## Contribute to Ubuntu Static Reports Operator
 
