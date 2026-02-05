@@ -2,11 +2,18 @@
 # See LICENSE file for licensing details.
 
 import logging
+import os
 
 import jubilant
+import pytest
 import requests
 
 from . import APPNAME, retry, wait_oneshot_finished
+
+requires_secret = pytest.mark.skipif(
+    os.environ.get("LPUSER_OAUTH_FILE") is None,
+    reason="LPUSER_OAUTH_FILE not set - secret-dependent tests skipped",
+)
 
 
 def deploy_wait_func(status):
@@ -66,29 +73,34 @@ def test_content_update_seeds(juju: jubilant.Juju):
 
 def test_content_package_subscribers(juju: jubilant.Juju):
     """Check the response of package-subscribers."""
+    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="package-subscribers.service")
     check_content(
         juju,
-        path="TODO-web-path",
-        startswith="TODO content at the beginning",
-        contains="TODO-something-later",
+        path="package-team-mapping.json",
+        startswith="{",
+        contains="\"packages\"",
     )
 
 
+@requires_secret
 def test_content_permissions_report(juju: jubilant.Juju):
     """Check the response of permissions-report."""
+    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="permissions-report.service")
     check_content(
         juju,
-        path="TODO-web-path",
-        startswith="TODO content at the beginning",
-        contains="TODO-something-later",
+        path="output/permissions-report.html",
+        startswith="<!DOCTYPE html>",
+        contains="Permission Report",
     )
 
 
+@requires_secret
 def test_content_packageset_report(juju: jubilant.Juju):
     """Check the response of packageset-report."""
+    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="packageset-report.service")
     check_content(
         juju,
-        path="TODO-web-path",
-        startswith="TODO content at the beginning",
-        contains="TODO-something-later",
+        path="output/packageset-report.html",
+        startswith="<!DOCTYPE html>",
+        contains="Packageset Report",
     )

@@ -104,3 +104,36 @@ secret:<someuuid>
 # To blast it away no matter the open half debugged state
 ❯ juju remove-application --no-prompt --force --no-wait ubuntu-static-reports
 ```
+
+## Integration Testing
+
+Integration tests run in an isolated LXD VM managed by spread:
+
+```bash
+make integration
+```
+
+This will:
+1. Use `charmcraft spread` to create an LXD VM
+2. Install juju via concierge inside the VM
+3. Deploy the charm and run pytest integration tests
+
+### Testing with Secrets
+
+Some services require Launchpad OAuth credentials:
+- `permissions-report.service`
+- `packageset-report.service`
+
+To test these services:
+
+1. Obtain OAuth credentials file (see "Deploying" section above)
+2. Export the file path on your host:
+   ```bash
+   export LPUSER_OAUTH_FILE=/path/to/lp-ubuntu-archive-unprivileged-bot.oauth
+   make integration
+   ```
+
+The file will be securely copied into the spread VM, then configured as a Juju secret.
+Tests requiring secrets will automatically skip if `LPUSER_OAUTH_FILE` is not set.
+
+**Note**: Never commit the OAuth file to the repository.

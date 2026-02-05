@@ -16,21 +16,46 @@ def juju():
 
 
 @fixture(scope="module")
-def ubuntu_static_reports_charm(request):
-    """ubuntu-static-reports charm used for integration testing."""
-    charm_file = request.config.getoption("--charm-path")
-    if charm_file:
-        return charm_file
+def lpuser_secret(juju):
+    """Create and grant Launchpad OAuth secret if LPUSER_OAUTH_FILE is set."""
+    oauth_file = os.environ.get("LPUSER_OAUTH_FILE")
+    if not oauth_file or not Path(oauth_file).exists():
+        return None
 
-    working_dir = os.getenv("SPREAD_PATH", Path("."))
+    with open(oauth_file) as f:
+        oauth_content = f.read()
 
-    subprocess.run(
-        ["/snap/bin/charmcraft", "pack", "--verbose"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=working_dir,
-        check=True,
+    secret_uri = juju.add_secret(
+        name="lpuser-oauth",
+        content={"lpoauthkey": oauth_content},
     )
 
-    return next(Path.glob(Path(working_dir), "*.charm")).absolute()
+    juju.grant_secret(secret_uri, "ubuntu-static-reports")
+
+    return secret_uri
+
+
+@fixture(scope="module")
+def ubuntu_static_reports_charm(request, juju, lpuser_secret):
+    """Deploy ubuntu-static-reports charm with optional secret configuration."""
+    charm_file = request.config.getoption("--charm-path")
+    if not charm_file:
+        working_dir = os.getenv("SPREAD_PATH", Path("."))
+
+        subprocess.run(
+            ["/snap/bin/charmcraft", "pack", "--verbose"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=working_dir,
+            check=True,
+        )
+
+        charm_file = next(Path.glob(Path(working_dir), "*.charm")).absolute()
+
+    juju.deploy(charm_file, app="ubuntu-static-reports")
+
+    if lpuser_secret:
+        juju.config("ubuntu-static-reports", {"lpuser_secret_id": lpuser_secret})
+
+    return charm_file

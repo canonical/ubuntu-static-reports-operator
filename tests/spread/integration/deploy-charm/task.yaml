@@ -11,7 +11,7 @@ execute: |
     args="--charm-path=$PWD/ubuntu-static-reports_amd64.charm $args"
   fi
 
-  make integration ARGS="$args"
+  make integration-execution ARGS="$args"
 
 restore: |
   if [[ -z "${CI:-}" ]]; then

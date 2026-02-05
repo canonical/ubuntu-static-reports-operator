@@ -34,6 +34,12 @@ unit:
 	uv run --all-extras coverage report
 
 integration:
+	charmcraft spread integration/
+
+integration-debug:
+	charmcraft spread -v -debug integration/
+
+integration-execution:
 	uv run --all-extras \
 		-m pytest \
 		--tb native \
