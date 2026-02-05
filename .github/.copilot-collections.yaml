@@ -1,0 +1,8 @@
+copilot:
+  # A tag of https://github.com/canonical/copilot-collections/tags
+  version: "v0.6.0"
+
+  # The collections you want to install
+  collections:
+    - charm-python
+    - pfe-charms
