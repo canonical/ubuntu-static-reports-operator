@@ -236,10 +236,10 @@ class StaticReports:
         systemd_unit_location.mkdir(parents=True, exist_ok=True)
 
         systemd_service = Path(f"src/systemd/{service}.service")
-        service_content = systemd_service.read_text()
+        service_content = systemd_service.read_text(encoding="utf-8")
 
         systemd_timer = Path(f"src/systemd/{service}.timer")
-        timer_content = systemd_timer.read_text()
+        timer_content = systemd_timer.read_text(encoding="utf-8")
 
         proxy_env_vars = ""
         if "http" in self.proxies:
@@ -250,8 +250,10 @@ class StaticReports:
             proxy_env_vars += "\nEnvironment=RSYNC_PROXY=" + self.proxies["rsync"]
 
         service_content += proxy_env_vars
-        (systemd_unit_location / f"{service}.service").write_text(service_content)
-        (systemd_unit_location / f"{service}.timer").write_text(timer_content)
+        (systemd_unit_location / f"{service}.service").write_text(
+            service_content, encoding="utf-8"
+        )
+        (systemd_unit_location / f"{service}.timer").write_text(timer_content, encoding="utf-8")
         logger.debug("Systemd units for %s created", service)
 
         try:

@@ -169,12 +169,12 @@ def test_setup_systemd_unit_writes_service_and_timer_with_proxy_environment(monk
 
     sr = staticreports.StaticReports()
 
-    def fake_read_text(self):
+    def fake_read_text(self, encoding=None):
         return "[Service]\nExecStart=/bin/true" if self.suffix == ".service" else "[Timer]"
 
     written = {}
 
-    def fake_write_text(self, text):
+    def fake_write_text(self, text, encoding=None):
         written[str(self)] = text
 
     monkeypatch.setattr(staticreports.Path, "read_text", fake_read_text)
@@ -207,12 +207,12 @@ def test_setup_systemd_unit_writes_rsync_proxy_environment_variable(monkeypatch)
 
     sr = staticreports.StaticReports()
 
-    def fake_read_text(self):
+    def fake_read_text(self, encoding=None):
         return "[Service]\nExecStart=/bin/true" if self.suffix == ".service" else "[Timer]"
 
     written = {}
 
-    def fake_write_text(self, text):
+    def fake_write_text(self, text, encoding=None):
         written[str(self)] = text
 
     monkeypatch.setattr(staticreports.Path, "read_text", fake_read_text)
@@ -232,12 +232,12 @@ def test_setup_systemd_unit_without_proxy_environment_variables(monkeypatch):
     """When no proxy is configured, no proxy environment variables should be injected."""
     sr = staticreports.StaticReports()
 
-    def fake_read_text(self):
+    def fake_read_text(self, encoding=None):
         return "[Service]\nExecStart=/bin/true" if self.suffix == ".service" else "[Timer]"
 
     written = {}
 
-    def fake_write_text(self, text):
+    def fake_write_text(self, text, encoding=None):
         written[str(self)] = text
 
     monkeypatch.setattr(staticreports.Path, "read_text", fake_read_text)
@@ -317,8 +317,8 @@ def test_configure_url_logs_configured_url(caplog):
 
 
 def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
-    monkeypatch.setattr(staticreports.Path, "read_text", lambda self: "[Service]")
-    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, t: None)
+    monkeypatch.setattr(staticreports.Path, "read_text", lambda self, encoding=None: "[Service]")
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, t, encoding=None: None)
     monkeypatch.setattr(
         staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
     )
