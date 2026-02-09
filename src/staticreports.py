@@ -202,6 +202,11 @@ class StaticReports:
                 group="ubuntu",
             )
             key_success = True
+
+            # Start services again, to get those that depended on LP
+            # credentials to truly run (or if present before, depend on new
+            # updated creds) now that the condition is met.
+            self.start()
         except (FileNotFoundError, NotADirectoryError) as e:
             logger.error(
                 "Failed to create lp credentials entry due to directory issues: %s", str(e)
