@@ -113,7 +113,7 @@ class StaticReports:
 
         logger.info("Updating repositories")
         for repo_url, repo_branch, repo_target in REPO_URLS:
-            logger.debug(f"Handle repository {repo_url}")
+            logger.debug("Handle repository %s", repo_url)
             try:
                 if not repo_target.is_dir():
                     run(
@@ -171,7 +171,7 @@ class StaticReports:
             logger.debug("Nginx service restarted")
             for service in UBUNTU_STATIC_REPORT_SERVICES:
                 systemd.service_start(service + ".service", "--no-block")
-                logger.debug(f"{service} service started")
+                logger.debug("%s service started", service)
         except CalledProcessError as e:
             logger.error("Failed to start systemd services: %s", e)
             raise
@@ -202,11 +202,6 @@ class StaticReports:
                 group="ubuntu",
             )
             key_success = True
-
-            # Start services again, to get those that depended on LP
-            # credentials to truly run (or if present before, depend on new
-            # updated creds) now that the condition is met.
-            self.start()
         except (FileNotFoundError, NotADirectoryError) as e:
             logger.error(
                 "Failed to create lp credentials entry due to directory issues: %s", str(e)
@@ -257,12 +252,12 @@ class StaticReports:
         service_content += proxy_env_vars
         (systemd_unit_location / f"{service}.service").write_text(service_content)
         (systemd_unit_location / f"{service}.timer").write_text(timer_content)
-        logger.debug(f"Systemd units for {service} created")
+        logger.debug("Systemd units for %s created", service)
 
         try:
             systemd.service_enable("--now", f"{service}.timer")
         except CalledProcessError as e:
-            logger.error(f"Failed to enable {service}.timer: %s", e)
+            logger.error("Failed to enable %s.timer: %s", service, e)
             raise
 
     def setup_systemd_units(self):
