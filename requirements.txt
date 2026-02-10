@@ -4,14 +4,20 @@ annotated-types==0.7.0
     # via pydantic
 charmlibs-apt==1.0.0.post0
     # via ubuntu-static-reports-operator (pyproject.toml)
+charmlibs-pathops==1.0.1.post0
+    # via ubuntu-static-reports-operator (pyproject.toml)
 importlib-metadata==8.7.0
-    # via opentelemetry-api
+    # via
+    #   opentelemetry-api
+    #   ops
 opentelemetry-api==1.38.0
     # via
     #   charmlibs-apt
     #   ops
-ops==3.3.1
-    # via ubuntu-static-reports-operator (pyproject.toml)
+ops==2.23.1
+    # via
+    #   ubuntu-static-reports-operator (pyproject.toml)
+    #   charmlibs-pathops
 pydantic==2.12.4
     # via ubuntu-static-reports-operator (pyproject.toml)
 pydantic-core==2.41.5

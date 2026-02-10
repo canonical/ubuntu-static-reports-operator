@@ -18,6 +18,7 @@ dev = [
     "requests",
     "jubilant",
     "ruff",
+    "urllib3>=2.6.3",
 ]
 
 # Testing tools configuration
