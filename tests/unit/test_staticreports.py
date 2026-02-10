@@ -95,6 +95,11 @@ def test_install_raises_when_script_copy_fails(monkeypatch):
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
+    monkeypatch.setattr(
+        staticreports.Path,
+        "unlink",
+        lambda self, missing_ok=True: None,
+    )
 
     def bad_copy(src, dst):
         raise OSError("disk full")
@@ -295,6 +300,13 @@ def test_install_packages_raises_when_package_installation_fails(monkeypatch):
 
 def test_install_raises_when_directory_creation_fails(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)
+    monkeypatch.setattr(
+        staticreports.Path,
+        "unlink",
+        lambda self, missing_ok=True: None,
+    )
 
     def boom(dir_path, exist_ok=True):
         raise OSError("no space")
@@ -365,6 +377,11 @@ def test_install_clones_git_repositories_into_configured_targets(monkeypatch, tm
     monkeypatch.setattr(
         staticreports.shutil, "copy", lambda src, dst: ops.append(("copy", str(src), str(dst)))
     )
+    monkeypatch.setattr(
+        staticreports.Path,
+        "unlink",
+        lambda self, missing_ok=True: ops.append(("unlink", str(self))),
+    )
 
     repo_target = tmp_path / "ubuntu-archive-tools"
     monkeypatch.setattr(
@@ -394,6 +411,12 @@ def test_install_clones_git_repositories_into_configured_targets(monkeypatch, tm
 def test_install_raises_when_git_clone_fails(monkeypatch):
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)
+    monkeypatch.setattr(
+        staticreports.Path,
+        "unlink",
+        lambda self, missing_ok=True: None,
+    )
 
     def bad_run(cmd, **kwargs):
         raise CalledProcessError(2, "git")
