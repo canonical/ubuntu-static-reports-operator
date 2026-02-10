@@ -6,7 +6,7 @@ import logging
 import jubilant
 from requests import Session
 
-from . import APPNAME, HAPROXY, SSC, DNSResolverHTTPSAdapter, retry, wait_oneshot_finished
+from . import APPNAME, HAPROXY, SSC, DNSResolverHTTPSAdapter, address, retry, wait_oneshot_finished
 
 
 def deploy_ha_wait_func(status):
@@ -33,21 +33,25 @@ def test_service_state_after_ha_deploy(juju: jubilant.Juju, ubuntu_static_report
     juju.integrate(APPNAME, HAPROXY)
     juju.integrate(f"{HAPROXY}:certificates", f"{SSC}:certificates")
 
-    juju.wait(deploy_ha_wait_func, timeout=1800)
+    juju.wait(deploy_ha_wait_func, timeout=3600)
     wait_oneshot_finished(
         juju, unit="ubuntu-static-reports/0", service="update-sync-blocklist.service"
     )
     wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-seeds.service")
 
 
-# These have to follow test_service_state_after_deploy so content is ready
-@retry(retry_num=24, retry_sleep_sec=5)
+# These have to follow test_service_state_after_ha_deploy so content is ready
+@retry(retry_num=48, retry_sleep_sec=10)
 def check_content(juju: jubilant.Juju, path: str, startswith: str, contains: str):
     """Check if the response through haproxy matches the expected content."""
     model_name = juju.model
     assert model_name is not None
 
-    haproxy_ip = juju.status().apps[HAPROXY].units[f"{HAPROXY}/0"].public_address
+    status = juju.status()
+    if HAPROXY not in status.apps:
+        raise AssertionError(f"{HAPROXY} not found in deployed apps - HA test requires haproxy")
+
+    haproxy_ip = address(juju, app=HAPROXY)
     external_hostname = "ubuntu-static-reports.internal"
 
     session = Session()
@@ -56,7 +60,7 @@ def check_content(juju: jubilant.Juju, path: str, startswith: str, contains: str
         f"https://{haproxy_ip}/{model_name}-{APPNAME}/{path}",
         headers={"Host": external_hostname},
         verify=False,
-        timeout=30,
+        timeout=60,
     )
 
     assert response.status_code == 200

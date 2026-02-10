@@ -34,10 +34,10 @@ unit:
 	uv run --all-extras coverage report
 
 integration:
-	charmcraft spread integration/
+	charmcraft.spread -v
 
 integration-debug:
-	charmcraft spread -v -debug integration/
+	charmcraft.spread -v -debug
 
 integration-execution:
 	uv run --all-extras \
