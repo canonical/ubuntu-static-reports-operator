@@ -3,7 +3,7 @@ Description=Ubuntu Static Reports - Update Seeds web view
 
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=5min
+OnUnitActiveSec=15min
 RandomizedDelaySec=60
 
 [Install]
