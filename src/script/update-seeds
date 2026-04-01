@@ -19,7 +19,7 @@ retry_cmd() {
     local cmd="$1"
     local max_attempts=${MAX_ATTEMPTS:-5}
     local attempt=1
-    local delay=${INITIAL_DELAY:-2}
+    local delay=${INITIAL_DELAY:-3}
 
     while true; do
         if eval "$cmd"; then
@@ -79,7 +79,8 @@ for dist in platform.{jammy,noble,plucky,questing,resolute} \
             ;;
     esac
     if [ -d "$dist" ]; then
-        retry_cmd "git -C $dist pull --quiet --force" || exit 1
+        retry_cmd "git -C $dist fetch origin --quiet --force" || exit 1
+        retry_cmd "git -C $dist reset --hard origin/$series" || exit 1
     else
         repo="https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}"
         series="${dist##*.}"
