@@ -1,0 +1,82 @@
+name: Publish to edge
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  pack-charm:
+    name: Prepare charm for upload
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup LXD
+        uses: canonical/setup-lxd@main
+
+      - name: Install charmcraft
+        run: sudo snap install charmcraft --classic
+
+      - name: Pack charm
+        run: charmcraft pack -v
+
+      - name: Upload charm artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: charm
+          path: ./*.charm
+
+  define-matrix:
+    name: Define charms upload matrix
+    runs-on: ubuntu-24.04
+    needs:
+      - pack-charm
+    outputs:
+      charms: ${{ steps.charms.outputs.charms }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download charm artifact(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: charm
+
+      - name: Generate matrix list
+        id: charms
+        run: |
+          list="$(ls *.charm | jq -r -ncR '[input]')"
+          echo "charms=$list"
+          echo "charms=$list" >> $GITHUB_OUTPUT
+
+  publish-to-edge:
+    name: Release to CharmHub
+    runs-on: ubuntu-24.04
+    needs:
+      - define-matrix
+    strategy:
+      matrix:
+        charm: ${{ fromJSON(needs.define-matrix.outputs.charms) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select charmhub channel
+        id: channel
+        uses: canonical/charming-actions/channel@2.7.0
+
+      - name: Download charm artifact(s)
+        uses: actions/download-artifact@v4
+        with:
+          name: charm
+
+      - name: Upload charm to charmhub
+        uses: canonical/charming-actions/upload-charm@2.7.0
+        with:
+          credentials: "${{ secrets.CHARMHUB_TOKEN }}"
+          channel: "${{ steps.channel.outputs.name }}"
+          built-charm-path: "${{ matrix.charm }}"
