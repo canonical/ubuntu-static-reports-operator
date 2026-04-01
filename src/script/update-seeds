@@ -19,7 +19,7 @@ retry_cmd() {
     local cmd="$1"
     local max_attempts=${MAX_ATTEMPTS:-5}
     local attempt=1
-    local delay=${INITIAL_DELAY:-2}
+    local delay=${INITIAL_DELAY:-3}
 
     while true; do
         if eval "$cmd"; then
