@@ -79,5 +79,6 @@ jobs:
         uses: canonical/charming-actions/upload-charm@2.7.0
         with:
           credentials: "${{ secrets.CHARMHUB_TOKEN }}"
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
           channel: "${{ steps.channel.outputs.name }}"
           built-charm-path: "${{ matrix.charm }}"
