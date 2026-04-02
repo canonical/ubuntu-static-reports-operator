@@ -147,7 +147,7 @@ class StaticReports:
                         timeout=300,
                     )
             except (CalledProcessError, SubprocessError, FileNotFoundError) as e:
-                logger.warning("Git handling {repo_url} failed: %s", e.stdout)
+                logger.warning("Git handling %s failed: %s", repo_url, e.stdout)
                 raise
 
         logger.info("Installing App and Config files")
