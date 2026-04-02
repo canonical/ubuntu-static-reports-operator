@@ -82,7 +82,8 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
             IOError,
             OSError,
             shutil.Error,
-        ):
+        ) as e:
+            logger.warning("Failed to set up the environment: %s", e)
             self.unit.status = ops.BlockedStatus(
                 "Failed to set up the environment. Check `juju debug-log` for details."
             )
