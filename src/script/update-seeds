@@ -78,12 +78,12 @@ for dist in platform.{jammy,noble,plucky,questing,resolute} \
             team=ubuntu-core-dev
             ;;
     esac
+    series="${dist##*.}"
     if [ -d "$dist" ]; then
         retry_cmd "git -C $dist fetch origin --quiet --force" || exit 1
         retry_cmd "git -C $dist reset --hard origin/$series" || exit 1
     else
         repo="https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}"
-        series="${dist##*.}"
         retry_cmd "git clone --quiet --branch $series $repo $dist" || exit 1
     fi
 done
