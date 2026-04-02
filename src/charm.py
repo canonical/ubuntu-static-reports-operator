@@ -7,7 +7,7 @@
 import logging
 import shutil
 import socket
-from subprocess import CalledProcessError
+from subprocess import CalledProcessError, SubprocessError
 
 import ops
 from charmlibs.apt import PackageError, PackageNotFoundError
@@ -77,6 +77,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
             self._staticreports.setup_systemd_units()
         except (
             CalledProcessError,
+            SubprocessError,
             PackageError,
             PackageNotFoundError,
             IOError,
