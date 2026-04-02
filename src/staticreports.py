@@ -99,7 +99,7 @@ class StaticReports:
         logger.info("Install required deb packages")
         self._install_packages()
 
-        logger.info("Create the required directories")
+        logger.info("Install 1/4 Create the required directories")
         for dir_path, dir_user, dir_group in SRV_DIRS:
             try:
                 os.makedirs(dir_path, exist_ok=True)
@@ -111,7 +111,7 @@ class StaticReports:
                 logger.warning("Creating directory %s failed: %s", dir_path, e)
                 raise
 
-        logger.info("Updating repositories")
+        logger.info("Install 2/4 Updating repositories")
         for repo_url, repo_branch, repo_target in REPO_URLS:
             logger.debug("Handle repository %s", repo_url)
             try:
@@ -154,7 +154,7 @@ class StaticReports:
                 logger.warning("Git handling %s failed: %s", repo_url, e.stdout)
                 raise
 
-        logger.info("Installing App and Config files")
+        logger.info("Install 3/4 Installing App and Config files")
         try:
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
@@ -164,7 +164,7 @@ class StaticReports:
             logger.warning("Error copying files: %s", str(e))
             raise
 
-        logger.info("Removing default Nginx configuration")
+        logger.info("Install 4/4 Removing default Nginx configuration")
         Path("/etc/nginx/sites-enabled/default").unlink(missing_ok=True)
 
     def start(self):
