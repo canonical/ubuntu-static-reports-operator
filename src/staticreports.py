@@ -235,6 +235,7 @@ class StaticReports:
 
     def setup_systemd_unit(self, service):
         """Set up the requested service and timer with proxy configuration."""
+        logger.debug("Setting up systemd unit for %s", service)
         systemd_unit_location = Path("/etc/systemd/system")
         systemd_unit_location.mkdir(parents=True, exist_ok=True)
 
@@ -251,19 +252,23 @@ class StaticReports:
             proxy_env_vars += "\nEnvironment=HTTPS_PROXY=" + self.proxies["https"]
         if "rsync" in self.proxies:
             proxy_env_vars += "\nEnvironment=RSYNC_PROXY=" + self.proxies["rsync"]
+        if proxy_env_vars:
+            logger.debug("Appending proxy env vars to %s.service: %s", service, proxy_env_vars)
 
         service_content += proxy_env_vars
         (systemd_unit_location / f"{service}.service").write_text(
             service_content, encoding="utf-8"
         )
         (systemd_unit_location / f"{service}.timer").write_text(timer_content, encoding="utf-8")
-        logger.debug("Systemd units for %s created", service)
+        logger.debug("Systemd units for %s written to %s", service, systemd_unit_location)
 
+        logger.debug("Enabling and starting %s.timer", service)
         try:
             systemd.service_enable("--now", f"{service}.timer")
         except CalledProcessError as e:
             logger.error("Failed to enable %s.timer: %s", service, e)
             raise
+        logger.debug("Systemd unit %s enabled and started", service)
 
     def setup_systemd_units(self):
         """Set up all needed systemd services and timers."""
