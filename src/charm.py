@@ -7,7 +7,7 @@
 import logging
 import shutil
 import socket
-from subprocess import CalledProcessError
+from subprocess import CalledProcessError, SubprocessError
 
 import ops
 from charmlibs.apt import PackageError, PackageNotFoundError
@@ -77,12 +77,14 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
             self._staticreports.setup_systemd_units()
         except (
             CalledProcessError,
+            SubprocessError,
             PackageError,
             PackageNotFoundError,
             IOError,
             OSError,
             shutil.Error,
-        ):
+        ) as e:
+            logger.warning("Failed to set up the environment: %s", e)
             self.unit.status = ops.BlockedStatus(
                 "Failed to set up the environment. Check `juju debug-log` for details."
             )

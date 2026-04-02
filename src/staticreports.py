@@ -99,7 +99,7 @@ class StaticReports:
         logger.info("Install required deb packages")
         self._install_packages()
 
-        logger.info("Create the required directories")
+        logger.info("Install 1/4 Create the required directories")
         for dir_path, dir_user, dir_group in SRV_DIRS:
             try:
                 os.makedirs(dir_path, exist_ok=True)
@@ -111,11 +111,14 @@ class StaticReports:
                 logger.warning("Creating directory %s failed: %s", dir_path, e)
                 raise
 
-        logger.info("Updating repositories")
+        logger.info("Install 2/4 Updating repositories")
         for repo_url, repo_branch, repo_target in REPO_URLS:
             logger.debug("Handle repository %s", repo_url)
             try:
                 if not repo_target.is_dir():
+                    logger.debug(
+                        "Running: git clone -b %s %s %s", repo_branch, repo_url, repo_target
+                    )
                     run(
                         [
                             "git",
@@ -133,11 +136,11 @@ class StaticReports:
                         timeout=300,
                     )
                 else:
+                    logger.debug("Running: git pull (cwd=%s)", repo_target)
                     run(
                         [
                             "git",
                             "pull",
-                            repo_branch,
                         ],
                         cwd=repo_target,
                         check=True,
@@ -148,10 +151,10 @@ class StaticReports:
                         timeout=300,
                     )
             except (CalledProcessError, SubprocessError, FileNotFoundError) as e:
-                logger.warning("Git handling {repo_url} failed: %s", e.stdout)
+                logger.warning("Git handling %s failed: %s", repo_url, e.stdout)
                 raise
 
-        logger.info("Installing App and Config files")
+        logger.info("Install 3/4 Installing App and Config files")
         try:
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
@@ -161,7 +164,7 @@ class StaticReports:
             logger.warning("Error copying files: %s", str(e))
             raise
 
-        logger.info("Removing default Nginx configuration")
+        logger.info("Install 4/4 Removing default Nginx configuration")
         Path("/etc/nginx/sites-enabled/default").unlink(missing_ok=True)
 
     def start(self):
@@ -232,6 +235,7 @@ class StaticReports:
 
     def setup_systemd_unit(self, service):
         """Set up the requested service and timer with proxy configuration."""
+        logger.debug("Setting up systemd unit for %s", service)
         systemd_unit_location = Path("/etc/systemd/system")
         systemd_unit_location.mkdir(parents=True, exist_ok=True)
 
@@ -248,19 +252,23 @@ class StaticReports:
             proxy_env_vars += "\nEnvironment=HTTPS_PROXY=" + self.proxies["https"]
         if "rsync" in self.proxies:
             proxy_env_vars += "\nEnvironment=RSYNC_PROXY=" + self.proxies["rsync"]
+        if proxy_env_vars:
+            logger.debug("Appending proxy env vars to %s.service: %s", service, proxy_env_vars)
 
         service_content += proxy_env_vars
         (systemd_unit_location / f"{service}.service").write_text(
             service_content, encoding="utf-8"
         )
         (systemd_unit_location / f"{service}.timer").write_text(timer_content, encoding="utf-8")
-        logger.debug("Systemd units for %s created", service)
+        logger.debug("Systemd units for %s written to %s", service, systemd_unit_location)
 
+        logger.debug("Enabling and starting %s.timer", service)
         try:
             systemd.service_enable("--now", f"{service}.timer")
         except CalledProcessError as e:
             logger.error("Failed to enable %s.timer: %s", service, e)
             raise
+        logger.debug("Systemd unit %s enabled and started", service)
 
     def setup_systemd_units(self):
         """Set up all needed systemd services and timers."""
