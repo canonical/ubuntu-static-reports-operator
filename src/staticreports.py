@@ -137,7 +137,6 @@ class StaticReports:
                         [
                             "git",
                             "pull",
-                            repo_branch,
                         ],
                         cwd=repo_target,
                         check=True,
