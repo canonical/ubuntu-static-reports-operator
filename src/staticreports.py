@@ -116,6 +116,9 @@ class StaticReports:
             logger.debug("Handle repository %s", repo_url)
             try:
                 if not repo_target.is_dir():
+                    logger.debug(
+                        "Running: git clone -b %s %s %s", repo_branch, repo_url, repo_target
+                    )
                     run(
                         [
                             "git",
@@ -133,6 +136,7 @@ class StaticReports:
                         timeout=300,
                     )
                 else:
+                    logger.debug("Running: git pull (cwd=%s)", repo_target)
                     run(
                         [
                             "git",
