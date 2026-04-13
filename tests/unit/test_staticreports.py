@@ -79,6 +79,7 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
         if dir_user is not None:
             assert ("chown", dir_path, dir_user, dir_group) in ops
 
+    assert ("copy", "src/script/update-bugpatterns", "/usr/bin") in ops
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
     assert (
