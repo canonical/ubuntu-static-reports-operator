@@ -1,0 +1,18 @@
+[Unit]
+Description=Ubuntu Static Reports - Bug Patterns Web view
+
+[Service]
+Type=oneshot
+Environment="DESTINATION=/srv/staticreports/www/bugpatterns/bugpatterns.xml"
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+ExecStart=update-bugpatterns

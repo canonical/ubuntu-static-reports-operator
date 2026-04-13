@@ -28,6 +28,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/seeds"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/packagesets"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/archive-permissions"), "ubuntu", "ubuntu"),
+    (Path("/srv/staticreports/www/bugpatterns"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 
@@ -42,6 +43,7 @@ REPO_URLS = [
 NGINX_SITE_CONFIG_PATH = Path("/etc/nginx/conf.d/staticreports.conf")
 
 UBUNTU_STATIC_REPORT_SERVICES = [
+    "update-bugpatterns",
     "update-sync-blocklist",
     "update-seeds",
     "packageset-report",
@@ -156,6 +158,7 @@ class StaticReports:
 
         logger.info("Install 3/4 Installing App and Config files")
         try:
+            shutil.copy("src/script/update-bugpatterns", "/usr/bin")
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)

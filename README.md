@@ -52,6 +52,14 @@ from various sources depending on the respective service.
   * Data: Package Set information stored in Launchpad
   * Presented at https://ubuntu-archive-team.ubuntu.com/packagesets/
 
+* update-bugpatterns
+  * TL;DR: git checkout and serve as XML avoiding pressure on the cgit frontend
+  * Timing: every hour
+  * Execution time: <30 seconds
+  * Code: included in this charm
+  * Data: Maintained in git at https://git.launchpad.net/~ubuntu-bugcontrol/apport/+git/ubuntu-bugpatterns
+  * Presented at https://ubuntu-archive-team.ubuntu.com/bugpatterns/bugpatterns.xml
+
 ## Basic usage
 
 Assuming you have access to a bootstrapped [Juju](https://juju.is) controller, you can deploy the charm with (For details on local manual debug see [CONTRIBUTING.md](CONTRIBUTING.md)):
@@ -92,13 +100,14 @@ next, the log output of each and more - use systemctl as the are all systemd
 timers and services.
 
 ```bash
-❯ systemctl list-timers --all update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report
-NEXT                        LEFT LAST                              PASSED UNIT                        ACTIVATES
-Tue 2025-12-16 14:57:43 UTC   1s -                                      - package-subscribers.timer   package-subscribers.service
-Tue 2025-12-16 14:57:45 UTC   3s Tue 2025-12-16 14:52:12 UTC     5min ago update-seeds.timer          update-seeds.service
-Tue 2025-12-16 14:57:48 UTC   6s -                                      - packageset-report.timer     packageset-report.service
-Tue 2025-12-16 14:57:56 UTC  13s Tue 2025-12-16 14:52:43 UTC 4min 58s ago update-sync-blocklist.timer update-sync-blocklist.service
--                              - Tue 2025-12-16 14:56:33 UTC  1min 8s ago permissions-report.timer    permissions-report.service
+❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report
+NEXT                            LEFT LAST                              PASSED UNIT                        ACTIVATES                    
+Mon 2026-04-13 11:44:21 UTC 3min 18s Mon 2026-04-13 11:39:10 UTC 1min 53s ago update-sync-blocklist.timer update-sync-blocklist.service
+Mon 2026-04-13 11:45:01 UTC 3min 58s Mon 2026-04-13 11:39:25 UTC 1min 37s ago update-bugpatterns.timer    update-bugpatterns.service
+Mon 2026-04-13 11:47:12 UTC     6min Mon 2026-04-13 11:31:25 UTC     9min ago update-seeds.timer          update-seeds.service
+Mon 2026-04-13 11:47:44 UTC     6min Mon 2026-04-13 11:15:25 UTC    25min ago package-subscribers.timer   package-subscribers.service
+Mon 2026-04-13 17:15:54 UTC 5h 34min Mon 2026-04-13 11:15:25 UTC    25min ago packageset-report.timer     packageset-report.service
+Mon 2026-04-13 17:17:36 UTC 5h 36min Mon 2026-04-13 11:15:25 UTC    25min ago permissions-report.timer    permissions-report.service
 ```
 
 Since the report execution is wrapped into systemd services, one can also use
