@@ -43,7 +43,7 @@ pydantic-core==2.41.5
     # via pydantic
 pygments==2.20.0
     # via pytest
-pytest==9.0.1
+pytest==9.0.3
     # via ubuntu-static-reports-operator (pyproject.toml)
 pyyaml==6.0.3
     # via
