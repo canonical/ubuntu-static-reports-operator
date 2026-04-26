@@ -50,7 +50,7 @@ pyyaml==6.0.3
     #   jubilant
     #   ops
     #   ops-scenario
-requests==2.33.0
+requests==2.33.1
     # via ubuntu-static-reports-operator (pyproject.toml)
 ruff==0.14.6
     # via ubuntu-static-reports-operator (pyproject.toml)
