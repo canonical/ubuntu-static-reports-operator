@@ -2,7 +2,7 @@
 #    uv pip compile --no-cache --all-extras pyproject.toml -o requirements-dev.txt
 annotated-types==0.7.0
     # via pydantic
-certifi==2026.1.4
+certifi==2026.4.22
     # via requests
 charmlibs-apt==1.0.0.post0
     # via ubuntu-static-reports-operator (pyproject.toml)
