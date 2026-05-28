@@ -6,7 +6,7 @@ charmlibs-apt==1.0.0.post0
     # via ubuntu-static-reports-operator (pyproject.toml)
 charmlibs-pathops==1.2.1
     # via ubuntu-static-reports-operator (pyproject.toml)
-importlib-metadata==8.9.0
+importlib-metadata==9.0.0
     # via
     #   opentelemetry-api
     #   ops
