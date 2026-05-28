@@ -10,7 +10,7 @@ charmlibs-pathops==1.0.1.post0
     # via ubuntu-static-reports-operator (pyproject.toml)
 charset-normalizer==3.4.7
     # via requests
-coverage==7.14.0
+coverage==7.14.1
     # via ubuntu-static-reports-operator (pyproject.toml)
 idna==3.15
     # via requests
