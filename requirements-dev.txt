@@ -52,7 +52,7 @@ pyyaml==6.0.3
     #   ops-scenario
 requests==2.34.2
     # via ubuntu-static-reports-operator (pyproject.toml)
-ruff==0.14.6
+ruff==0.15.14
     # via ubuntu-static-reports-operator (pyproject.toml)
 typing-extensions==4.15.0
     # via
