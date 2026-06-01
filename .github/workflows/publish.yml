@@ -55,6 +55,8 @@ jobs:
   publish-to-edge:
     name: Release to CharmHub
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     needs:
       - define-matrix
     strategy:
