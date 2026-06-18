@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup LXD
         uses: canonical/setup-lxd@main
@@ -38,7 +38,7 @@ jobs:
       charms: ${{ steps.charms.outputs.charms }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Download charm artifact(s)
         uses: actions/download-artifact@v8
@@ -64,7 +64,7 @@ jobs:
         charm: ${{ fromJSON(needs.define-matrix.outputs.charms) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
