@@ -5,7 +5,6 @@ Description=Ubuntu Static Reports - Pending SRU Report web view
 Type=oneshot
 Environment="WORKDIR=/srv/staticreports/www/pending-sru"
 Environment="SRCDIR=/usr/local/src/ubuntu-archive-tools"
-Environment="LOCKFILE=/home/ubuntu/.sru-report.lock"
 TimeoutStartSec=infinity
 
 User=ubuntu
