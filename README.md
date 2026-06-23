@@ -60,6 +60,14 @@ from various sources depending on the respective service.
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-bugcontrol/apport/+git/ubuntu-bugpatterns
   * Presented at https://ubuntu-archive-team.ubuntu.com/bugpatterns/bugpatterns.xml
 
+* sru-report
+  * TL;DR: Convert LP API data into a report about pending Stable Release Updates
+  * Timing: every 30 minutes
+  * Execution time: up to several hours (8h timeout)
+  * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/sru-report
+  * Data: Pending SRUs in the `-proposed` pockets, queried anonymously from Launchpad
+  * Presented at https://ubuntu-archive-team.ubuntu.com/pending-sru/pending-sru.html
+
 ## Basic usage
 
 Assuming you have access to a bootstrapped [Juju](https://juju.is) controller, you can deploy the charm with (For details on local manual debug see [CONTRIBUTING.md](CONTRIBUTING.md)):
