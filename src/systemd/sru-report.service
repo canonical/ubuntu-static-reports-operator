@@ -1,0 +1,23 @@
+[Unit]
+Description=Ubuntu Static Reports - Pending SRU Report web view
+
+[Service]
+Type=oneshot
+Environment="WORKDIR=/srv/staticreports/www/pending-sru"
+Environment="SRCDIR=/usr/local/src/ubuntu-archive-tools"
+Environment="LOCKFILE=/home/ubuntu/.sru-report.lock"
+TimeoutStartSec=infinity
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+WorkingDirectory=/usr/local/src/ubuntu-archive-tools
+ExecStartPre=mkdir -p ${WORKDIR}
+ExecStart=sru-report

@@ -1,0 +1,29 @@
+#! /bin/bash
+# Wrapper around the sru-report tool from ubuntu-archive-tools.
+# Evolved from the historical crontab entry, dropping the `git pull`
+# (the charm manages the checkout) and the proxy override (the charm
+# injects proxy configuration via systemd) while keeping the run lock,
+# the C locale, the timeout, and the atomic publish of the report.
+set -e
+
+srcdir=${SRCDIR:-"/usr/local/src/ubuntu-archive-tools"}
+# Allow to specify the destination externally
+workdir=${WORKDIR:-"$HOME/public_html/pending-sru"}
+lockfile=${LOCKFILE:-"$HOME/.sru-report.lock"}
+
+destination="$workdir/pending-sru.html"
+
+mkdir -p "$workdir"
+
+# sru-report prints the HTML report to stdout and writes sru_report.yaml into
+# the current directory, so run from the output directory to collect both.
+cd "$workdir"
+
+# flock -xn skips the run if a previous one is still going; the report can take
+# hours. LC_ALL=C keeps the generated HTML stable regardless of host locale.
+flock -xn "$lockfile" -c \
+    "LC_ALL=C timeout 8h '$srcdir/sru-report' > '${destination}.new'"
+
+# Atomic update of the published HTML (only the final file is in the web path)
+echo "Status: atomic exchange"
+mv "${destination}.new" "$destination"
