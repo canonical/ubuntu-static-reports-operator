@@ -2,9 +2,9 @@
 # Wrapper around the sru-report tool from ubuntu-archive-tools.
 # Evolved from the historical crontab entry, dropping the `git pull`
 # (the charm manages the checkout), the proxy override (the charm injects
-# proxy configuration via systemd) and the run lock (systemd already
-# serialises runs of the oneshot service), while keeping the C locale,
-# the timeout, and the atomic publish of the report.
+# proxy configuration via systemd), the run lock and the run timeout (the
+# oneshot service serialises runs and bounds them via TimeoutStartSec),
+# while keeping the C locale and the atomic publish of the report.
 set -e
 
 srcdir=${SRCDIR:-"/usr/local/src/ubuntu-archive-tools"}
@@ -20,7 +20,7 @@ mkdir -p "$workdir"
 cd "$workdir"
 
 # LC_ALL=C keeps the generated HTML stable regardless of host locale.
-LC_ALL=C timeout 8h "$srcdir/sru-report" >"${destination}.new"
+LC_ALL=C "$srcdir/sru-report" >"${destination}.new"
 
 # Atomic update of the published HTML (only the final file is in the web path)
 echo "Status: atomic exchange"

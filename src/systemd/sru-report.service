@@ -5,7 +5,7 @@ Description=Ubuntu Static Reports - Pending SRU Report web view
 Type=oneshot
 Environment="WORKDIR=/srv/staticreports/www/pending-sru"
 Environment="SRCDIR=/usr/local/src/ubuntu-archive-tools"
-TimeoutStartSec=infinity
+TimeoutStartSec=8h
 
 User=ubuntu
 KeyringMode=private
