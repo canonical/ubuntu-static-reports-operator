@@ -18,4 +18,4 @@ ProtectKernelTunables=yes
 RestrictSUIDSGID=yes
 
 WorkingDirectory=/usr/local/src/ubuntu-archive-tools
-ExecStart=sru-report
+ExecStart=/usr/bin/sru-report
