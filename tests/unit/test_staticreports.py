@@ -540,6 +540,7 @@ def test_setup_systemd_unit_for_sru_report_uses_no_launchpad_credentials(monkeyp
     sr.setup_systemd_unit("sru-report")
 
     svc = written["/etc/systemd/system/sru-report.service"]
-    assert "WORKDIR=/srv/staticreports/www/pending-sru" in svc
+    assert "OUTPUTDIR=/srv/staticreports/www/pending-sru" in svc
+    assert "/usr/bin/sru-report" in svc
     assert "LP_CREDENTIALS_FILE" not in svc
     assert "lp-ubuntu-archive-unprivileged-bot.oauth" not in svc

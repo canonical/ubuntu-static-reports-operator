@@ -6,20 +6,19 @@
 # TimeoutStartSec), while keeping the C locale.
 set -e
 
-srcdir=${SRCDIR:-"/usr/local/src/ubuntu-archive-tools"}
+SRU_REPORT_SCRIPT="/usr/local/src/ubuntu-archive-tools/sru-report"
 # Allow to specify the destination externally
-workdir=${WORKDIR:-"$HOME/public_html/pending-sru"}
+outputdir=${OUTPUTDIR:-"$HOME/public_html/pending-sru"}
+destination="$outputdir/pending-sru.html"
 
-destination="$workdir/pending-sru.html"
-
-mkdir -p "$workdir"
+mkdir -p "$outputdir"
 
 # sru-report prints the HTML report to stdout and writes sru_report.yaml into
 # the current directory, so run from the output directory to collect both.
-cd "$workdir"
+cd "$outputdir"
 
 # LC_ALL=C keeps the generated HTML stable regardless of host locale.
-LC_ALL=C "$srcdir/sru-report" >"${destination}.new"
+LC_ALL=C "$SRU_REPORT_SCRIPT" > "${destination}.new"
 
 # If we got this far, all went well, so rename
 mv "${destination}.new" "$destination"
