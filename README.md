@@ -61,12 +61,12 @@ from various sources depending on the respective service.
   * Presented at https://ubuntu-archive-team.ubuntu.com/bugpatterns/bugpatterns.xml
 
 * sru-report
-  * TL;DR: Convert LP API data into a report about pending Stable Release Updates
+  * TL;DR: generate the Pending Ubuntu SRU report
   * Timing: every 30 minutes
   * Execution time: up to several hours (8h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/sru-report
-  * Data: Pending SRUs in the `-proposed` pockets, queried anonymously from Launchpad
-  * Presented at https://ubuntu-archive-team.ubuntu.com/pending-sru/pending-sru.html
+  * Data: Pending SRUs in the `-proposed` pockets for all stable releases of Ubuntu
+  * Previously presented at https://ubuntu-archive-team.ubuntu.com/pending-sru.html
 
 ## Basic usage
 
