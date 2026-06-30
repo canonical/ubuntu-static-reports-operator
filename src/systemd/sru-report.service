@@ -1,0 +1,18 @@
+[Unit]
+Description=Ubuntu Static Reports - Pending SRU Report web view
+
+[Service]
+Type=oneshot
+Environment="OUTPUTDIR=/srv/staticreports/www/pending-sru"
+TimeoutStartSec=8h
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+ExecStart=/usr/bin/sru-report

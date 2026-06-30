@@ -479,3 +479,68 @@ def test_configure_lpoauthkey_returns_false_on_write_errors(localpathmock):
         assert sr.configure_lpoauthkey("data") is False
     finally:
         _os.makedirs = _os_makedirs
+
+
+def test_sru_report_is_a_managed_static_report_service():
+    assert "sru-report" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
+
+
+def test_install_copies_sru_report_script_to_usr_bin(monkeypatch):
+    monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(staticreports, "run", Mock())
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    monkeypatch.setattr(staticreports.Path, "unlink", lambda self, missing_ok=True: None)
+
+    copies = []
+    monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: copies.append((src, dst)))
+    sr = staticreports.StaticReports()
+
+    sr.install()
+
+    assert ("src/script/sru-report", "/usr/bin") in copies
+
+
+def test_install_creates_pending_sru_output_directory(monkeypatch):
+    monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(staticreports, "run", Mock())
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)
+    monkeypatch.setattr(staticreports.Path, "unlink", lambda self, missing_ok=True: None)
+
+    created = []
+    monkeypatch.setattr(
+        staticreports.os, "makedirs", lambda dir_path, exist_ok=True: created.append(dir_path)
+    )
+    sr = staticreports.StaticReports()
+
+    sr.install()
+
+    assert Path("/srv/staticreports/www/pending-sru") in created
+
+
+def test_setup_systemd_unit_for_sru_report_uses_no_launchpad_credentials(monkeypatch):
+    """The pending-SRU report logs into Launchpad anonymously.
+
+    Its unit must therefore not reference the shared Launchpad OAuth
+    credentials used by the other reports.
+    """
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=False, exist_ok=False: None
+    )
+    monkeypatch.setattr(staticreports.systemd, "service_enable", lambda *args, **kwargs: None)
+    sr = staticreports.StaticReports()
+
+    sr.setup_systemd_unit("sru-report")
+
+    svc = written["/etc/systemd/system/sru-report.service"]
+    assert "OUTPUTDIR=/srv/staticreports/www/pending-sru" in svc
+    assert "/usr/bin/sru-report" in svc
+    assert "LP_CREDENTIALS_FILE" not in svc
+    assert "lp-ubuntu-archive-unprivileged-bot.oauth" not in svc

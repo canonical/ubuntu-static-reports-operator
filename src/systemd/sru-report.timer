@@ -1,0 +1,10 @@
+[Unit]
+Description=Ubuntu Static Reports - Update Pending SRU Report web view
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=30min
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
