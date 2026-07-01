@@ -34,6 +34,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/archive-permissions"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/bugpatterns"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/pending-sru"), "ubuntu", "ubuntu"),
+    (Path("/var/cache/mirror/ubuntu"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 
@@ -55,6 +56,7 @@ UBUNTU_STATIC_REPORT_SERVICES = [
     "package-subscribers",
     "permissions-report",
     "sru-report",
+    "update-archive-mirror",
 ]
 
 LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
@@ -168,6 +170,7 @@ class StaticReports:
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
             shutil.copy("src/script/sru-report", "/usr/bin")
+            shutil.copy("src/script/update-archive-mirror", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:
