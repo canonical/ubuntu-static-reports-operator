@@ -1,0 +1,39 @@
+#! /bin/sh
+# Maintain a local partial archive mirror of an Ubuntu release.
+set -e
+
+# Base directory for the local Ubuntu mirror.
+MIRROR="${MIRROR:-/var/cache/mirror/ubuntu}"
+
+# rsync source for the dists/ tree.
+MIRROR_SOURCE="${MIRROR_SOURCE:-rsync://archive.ubuntu.com/ubuntu/dists/}"
+
+# The release to mirror. Defaults to the current distro-info development release.
+RELEASE="${RELEASE:-$(distro-info --devel)}"
+if [ -z "$RELEASE" ]; then
+    echo "ERROR: no release specified and could not determine the development" >&2
+    echo "       release from distro-info --devel. Set RELEASE=<release>" >&2
+    echo "       explicitly, or install/update the distro-info-data package." >&2
+    exit 1
+fi
+
+mkdir -p "$MIRROR"
+
+echo "Status: syncing local mirror for release: $RELEASE"
+
+# Mirror the archive with rsync, excluding releases other than the requested one.
+rsync -rtlH --safe-links --delete --delete-excluded --prune-empty-dirs \
+    --include="/$RELEASE/" \
+    --exclude='/*' \
+    --include='Packages*' \
+    --include='Sources*' \
+    --include='Release*' \
+    --include='InRelease' \
+    --include='udeb.list' \
+    --include='**/installer-*/current' \
+    --include='Contents-*' \
+    --include='*/' \
+    --exclude='*' \
+    "$MIRROR_SOURCE" "$MIRROR/dists/"
+
+echo "Status: local mirror up to date at $MIRROR (release: $RELEASE)"
