@@ -1,0 +1,10 @@
+[Unit]
+Description=Ubuntu Static Reports - archive mirror sync
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

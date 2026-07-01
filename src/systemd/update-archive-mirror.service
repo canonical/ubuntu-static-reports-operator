@@ -1,0 +1,17 @@
+[Unit]
+Description=Ubuntu Static Reports - archive mirror sync
+
+[Service]
+Type=oneshot
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+ExecStart=update-archive-mirror
