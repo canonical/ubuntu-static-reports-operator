@@ -157,3 +157,29 @@ def test_content_packageset_report(juju: jubilant.Juju):
         startswith="<!DOCTYPE html>",
         contains="Packageset Report",
     )
+
+
+def test_archive_mirror_sync_populates_local_mirror(juju: jubilant.Juju):
+    """Check that the archive mirror sync populates /var/cache/mirror for the devel release."""
+    unit = "ubuntu-static-reports/0"
+    wait_oneshot_finished(juju, unit=unit, service="update-archive-mirror.service")
+
+    devel = juju.ssh(unit, "distro-info --devel").strip()
+    assert devel, "distro-info --devel returned nothing on the unit"
+
+    dist_dir = f"/var/cache/mirror/ubuntu/dists/{devel}"
+
+    # The release tree exists and carries its top-level Release index.
+    juju.ssh(unit, f"test -f {dist_dir}/Release")
+
+    # Check Sources and Packages info downloaded
+    juju.ssh(
+        unit,
+        f"ls {dist_dir}/*/source/Sources.gz >/dev/null 2>&1 || "
+        f"{{ echo 'no Sources.gz under {dist_dir}'; ls -R {dist_dir}; exit 1; }}",
+    )
+    juju.ssh(
+        unit,
+        f"ls {dist_dir}/*/binary-*/Packages.gz >/dev/null 2>&1 || "
+        f"{{ echo 'no Packages.gz under {dist_dir}'; ls -R {dist_dir}; exit 1; }}",
+    )
