@@ -17,12 +17,14 @@ from charmlibs.apt import PackageError, PackageNotFoundError
 logger = logging.getLogger(__name__)
 
 PACKAGES = [
+    "distro-info",
     "git",
     "nginx-light",
     "procmail",
     "python3-keyring",
     "python3-launchpadlib",
     "python3-yaml",
+    "rsync",
 ]
 
 SRV_DIRS = [
