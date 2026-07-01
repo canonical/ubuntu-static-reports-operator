@@ -82,6 +82,7 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     assert ("copy", "src/script/update-bugpatterns", "/usr/bin") in ops
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
+    assert ("copy", "src/script/update-archive-mirror", "/usr/bin") in ops
     assert (
         "copy",
         "src/nginx/staticreports.conf",
