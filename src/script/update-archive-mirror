@@ -6,7 +6,7 @@ set -e
 MIRROR="${MIRROR:-/var/cache/mirror/ubuntu}"
 
 # rsync source for the dists/ tree.
-MIRROR_SOURCE="${MIRROR_SOURCE:-rsync://archive.ubuntu.com/ubuntu/dists/}"
+MIRROR_SOURCE="${MIRROR_SOURCE:-rsync://rsync.archive.ubuntu.com/ubuntu/dists/}"
 
 # The release to mirror. Defaults to the current distro-info development release.
 RELEASE="${RELEASE:-$(distro-info --devel)}"
