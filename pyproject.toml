@@ -18,6 +18,7 @@ dev = [
     "requests",
     "jubilant",
     "ruff",
+    "ty",
     "urllib3>=2.7.0",
 ]
 
@@ -31,6 +32,7 @@ show_missing = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
+pythonpath = [".", "lib", "src"]
 
 # Linting tools configuration
 [tool.ruff]
@@ -62,3 +64,7 @@ skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage"
 
 [tool.pyright]
 include = ["src/**.py"]
+
+[tool.ty.environment]
+# Resolve the charm's first-party modules (src/) and bundled charm libs (lib/).
+extra-paths = ["lib", "src"]
