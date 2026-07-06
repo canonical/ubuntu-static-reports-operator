@@ -6,10 +6,6 @@ charmlibs-apt==1.0.0.post1
     # via ubuntu-static-reports-operator (pyproject.toml)
 charmlibs-pathops==1.3.0.post0
     # via ubuntu-static-reports-operator (pyproject.toml)
-importlib-metadata==9.0.0
-    # via
-    #   opentelemetry-api
-    #   ops
 opentelemetry-api==1.43.0
     # via
     #   charmlibs-apt
@@ -20,7 +16,7 @@ ops==3.8.0
     #   charmlibs-pathops
 pydantic==2.13.4
     # via ubuntu-static-reports-operator (pyproject.toml)
-pydantic-core==2.47.0
+pydantic-core==2.46.4
     # via pydantic
 pyyaml==6.0.3
     # via ops
@@ -34,5 +30,3 @@ typing-inspection==0.4.2
     # via pydantic
 websocket-client==1.9.0
     # via ops
-zipp==4.1.0
-    # via importlib-metadata
