@@ -34,7 +34,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/archive-permissions"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/bugpatterns"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/pending-sru"), "ubuntu", "ubuntu"),
-    (Path("/var/cache/mirror/ubuntu"), "ubuntu", "ubuntu"),
+    (Path("/var/cache/mirror"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 

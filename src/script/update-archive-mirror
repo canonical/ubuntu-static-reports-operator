@@ -3,7 +3,13 @@
 set -e
 
 # Base directory for the local Ubuntu mirror.
-MIRROR="${MIRROR:-/var/cache/mirror/ubuntu}"
+MIRROR_BASE="${MIRROR_BASE:-/var/cache/mirror}"
+
+# Directory for the latest Ubuntu mirror.
+MIRROR="$MIRROR_BASE/ubuntu"
+
+# Temporary directory for the rsync mirror process.
+MIRROR_TMP="$MIRROR_BASE/ubuntu-sync-in-progress"
 
 # rsync source for the dists/ tree.
 MIRROR_SOURCE="${MIRROR_SOURCE:-rsync://rsync.archive.ubuntu.com/ubuntu/dists/}"
@@ -17,7 +23,11 @@ if [ -z "$RELEASE" ]; then
     exit 1
 fi
 
+rm -rf "$MIRROR_TMP"
 mkdir -p "$MIRROR"
+
+echo "Status: copying current mirror to sync directory: $MIRROR_TMP"
+cp -a "$MIRROR" "$MIRROR_TMP"
 
 echo "Status: syncing local mirror for release: $RELEASE"
 
@@ -34,6 +44,9 @@ rsync -rtlH --safe-links --delete --delete-excluded --prune-empty-dirs \
     --include='Contents-*' \
     --include='*/' \
     --exclude='*' \
-    "$MIRROR_SOURCE" "$MIRROR/dists/"
+    "$MIRROR_SOURCE" "$MIRROR_TMP/dists/"
+
+rm -rf "$MIRROR"
+mv "$MIRROR_TMP" "$MIRROR"
 
 echo "Status: local mirror up to date at $MIRROR (release: $RELEASE)"
