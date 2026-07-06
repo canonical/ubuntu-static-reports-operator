@@ -82,6 +82,9 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     assert ("copy", "src/script/update-bugpatterns", "/usr/bin") in ops
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
+    assert ("copy", "src/script/update-archive-mirror", "/usr/bin") in ops
+    assert ("copy", "src/script/germinate-ubuntu", "/usr/bin") in ops
+    assert ("copy", "src/script/update-germinate", "/usr/bin") in ops
     assert (
         "copy",
         "src/nginx/staticreports.conf",
@@ -327,6 +330,57 @@ def test_configure_url_logs_configured_url(caplog):
         sr.configure_url("http://example.local:80")
 
     assert "The url in use is http://example.local:80" in caplog.text
+
+
+def test_configure_archive_mirror_writes_overrides(monkeypatch):
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
+    relinked = {}
+    monkeypatch.setattr(
+        staticreports, "_relink", lambda link, target: relinked.__setitem__(str(link), target)
+    )
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda path, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    sr = staticreports.StaticReports()
+
+    sr.configure_archive_mirror("rsync://host/dists/", "/var/cache/mirror")
+
+    content = written[staticreports.ARCHIVE_MIRROR_ENV_PATH]
+    assert "RSYNC_ARCHIVE_SOURCE=rsync://host/dists/" in content
+    assert "MIRROR_DIR=/var/cache/mirror" in content
+    assert relinked[str(staticreports.GERMINATE_WEB_PATH)] == "/var/cache/mirror/germinate/current"
+
+
+def test_configure_archive_mirror_relinks_germinate_to_default_when_mirror_dir_empty(monkeypatch):
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text, encoding=None: None)
+    relinked = {}
+    monkeypatch.setattr(
+        staticreports, "_relink", lambda link, target: relinked.__setitem__(str(link), target)
+    )
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda path, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    sr = staticreports.StaticReports()
+
+    sr.configure_archive_mirror("", "")
+
+    assert (
+        relinked[str(staticreports.GERMINATE_WEB_PATH)]
+        == f"{staticreports.DEFAULT_MIRROR_DIR}/germinate/current"
+    )
+
+
+def test_update_germinate_is_a_registered_report_service():
+    assert "update-germinate" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
 
 
 def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):

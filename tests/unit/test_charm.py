@@ -39,6 +39,13 @@ def base_state(ctx):
     return State(leader=True)
 
 
+@pytest.fixture(autouse=True)
+def mock_configure_archive_mirror():
+    """Stub configure_archive_mirror so unit tests never write to the host."""
+    with patch("charm.StaticReports.configure_archive_mirror") as mock:
+        yield mock
+
+
 @patch("charm.StaticReports.install")
 @patch("charm.StaticReports.setup_systemd_units")
 def test_install_event_sets_active_status_on_success(systemd_mock, install_mock, ctx, base_state):
@@ -124,6 +131,26 @@ def test_config_changed_event_configures_url_and_oauth_on_success(
     assert out.unit_status == ActiveStatus()
     configure_mock.assert_called()
     lpoauth_mock.assert_called()
+
+
+def test_config_changed_event_writes_archive_mirror_overrides_from_config(
+    mock_configure_archive_mirror, ctx
+):
+    """The archive rsync config and mirror_dir options are passed to configure_archive_mirror."""
+    state = State(
+        leader=True,
+        config={
+            "rsync_archive_source": "rsync://host/dists/",
+            "mirror_dir": "/srv/mirror",
+        },
+    )
+
+    ctx.run(ctx.on.config_changed(), state)
+
+    mock_configure_archive_mirror.assert_called_once_with(
+        archive_rsync_source="rsync://host/dists/",
+        mirror_dir="/srv/mirror",
+    )
 
 
 @patch(

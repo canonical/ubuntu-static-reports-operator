@@ -17,12 +17,15 @@ from charmlibs.apt import PackageError, PackageNotFoundError
 logger = logging.getLogger(__name__)
 
 PACKAGES = [
+    "distro-info",
+    "germinate",
     "git",
     "nginx-light",
     "procmail",
     "python3-keyring",
     "python3-launchpadlib",
     "python3-yaml",
+    "rsync",
 ]
 
 SRV_DIRS = [
@@ -53,9 +56,28 @@ UBUNTU_STATIC_REPORT_SERVICES = [
     "package-subscribers",
     "permissions-report",
     "sru-report",
+    "update-archive-mirror",
 ]
 
 LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
+
+ARCHIVE_MIRROR_ENV_PATH = "/etc/staticreports/archive-mirror.env"
+
+# germinate's real (hardlink-friendly) storage lives under mirror_dir, next to
+# the archive snapshots; this is the stable web path symlinked to its `current`.
+GERMINATE_WEB_PATH = Path("/srv/staticreports/www/germinate")
+DEFAULT_MIRROR_DIR = "/var/cache/mirror/ubuntu"
+
+
+def _relink(link: Path, target: str) -> None:
+    """Point `link` at `target`, replacing any existing file/dir/symlink."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or link.exists():
+        if link.is_dir() and not link.is_symlink():
+            shutil.rmtree(link)
+        else:
+            link.unlink()
+    link.symlink_to(target)
 
 
 class StaticReports:
@@ -159,7 +181,7 @@ class StaticReports:
                         timeout=300,
                     )
             except (CalledProcessError, SubprocessError, FileNotFoundError) as e:
-                logger.warning("Git handling %s failed: %s", repo_url, e.stdout)
+                logger.warning("Git handling %s failed: %s", repo_url, e)
                 raise
 
         logger.info("Install 3/4 Installing App and Config files")
@@ -168,6 +190,9 @@ class StaticReports:
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
             shutil.copy("src/script/sru-report", "/usr/bin")
+            shutil.copy("src/script/update-archive-mirror", "/usr/bin")
+            shutil.copy("src/script/germinate-ubuntu", "/usr/bin")
+            shutil.copy("src/script/update-germinate", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:
@@ -234,6 +259,45 @@ class StaticReports:
         )
         return key_success
 
+    def configure_archive_mirror(self, archive_rsync_source: str, mirror_dir: str):
+        """Write the archive-mirror environment overrides from charm config.
+
+        The update-archive-mirror systemd unit reads these via EnvironmentFile, so
+        updates take effect on the next run without rewriting the unit file.
+        Empty values are omitted so the script falls back to its own defaults.
+
+        Also (re)points the germinate web path at <mirror_dir>/germinate/current,
+        so nginx serves germinate's real (hardlink-friendly) storage under
+        mirror_dir without moving it into the web root itself.
+        """
+        overrides = {
+            "RSYNC_ARCHIVE_SOURCE": archive_rsync_source,
+            "MIRROR_DIR": mirror_dir,
+        }
+        content = "".join(f"{k}={v}\n" for k, v in overrides.items() if v)
+        env_file = Path(ARCHIVE_MIRROR_ENV_PATH)
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(content, encoding="utf-8")
+        logger.debug(
+            "configure_archive_mirror: wrote archive-mirror configuration to %s", env_file
+        )
+
+        # update-archive-mirror.service runs as User=ubuntu, so the mirror root
+        # must exist and be owned by ubuntu before that unit can mkdir under it.
+        mirror_root = mirror_dir or DEFAULT_MIRROR_DIR
+        try:
+            os.makedirs(mirror_root, exist_ok=True)
+            shutil.chown(mirror_root, "ubuntu", "ubuntu")
+        except OSError as e:
+            logger.warning("Creating mirror directory %s failed: %s", mirror_root, e)
+            raise
+
+        germinate_current = f"{mirror_root}/germinate/current"
+        _relink(GERMINATE_WEB_PATH, germinate_current)
+        logger.debug(
+            "configure_archive_mirror: relinked %s to %s", GERMINATE_WEB_PATH, germinate_current
+        )
+
     def refresh_report(self):
         """Refresh all the reports - wait for completion."""
         try:
@@ -253,7 +317,10 @@ class StaticReports:
         service_content = systemd_service.read_text(encoding="utf-8")
 
         systemd_timer = Path(f"src/systemd/{service}.timer")
-        timer_content = systemd_timer.read_text(encoding="utf-8")
+        if systemd_timer.exists():
+            timer_content = systemd_timer.read_text(encoding="utf-8")
+        else:
+            timer_content = None
 
         proxy_env_vars = ""
         if "http" in self.proxies:
@@ -271,15 +338,26 @@ class StaticReports:
         (systemd_unit_location / f"{service}.service").write_text(
             service_content, encoding="utf-8"
         )
-        (systemd_unit_location / f"{service}.timer").write_text(timer_content, encoding="utf-8")
+        if timer_content is not None:
+            (systemd_unit_location / f"{service}.timer").write_text(
+                timer_content, encoding="utf-8"
+            )
         logger.debug("Systemd units for %s written to %s", service, systemd_unit_location)
 
-        logger.debug("Enabling and starting %s.timer", service)
-        try:
-            systemd.service_enable("--now", f"{service}.timer")
-        except CalledProcessError as e:
-            logger.error("Failed to enable %s.timer: %s", service, e)
-            raise
+        if timer_content is not None:
+            logger.debug("Enabling and starting %s.timer", service)
+            try:
+                systemd.service_enable("--now", f"{service}.timer")
+            except CalledProcessError as e:
+                logger.error("Failed to enable %s.timer: %s", service, e)
+                raise
+        else:
+            logger.debug("Enabling %s.service (no timer; triggered via OnSuccess)", service)
+            try:
+                systemd.service_enable(f"{service}.service")
+            except CalledProcessError as e:
+                logger.error("Failed to enable %s.service: %s", service, e)
+                raise
         logger.debug("Systemd unit %s enabled and started", service)
 
     def setup_systemd_units(self):

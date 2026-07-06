@@ -157,3 +157,17 @@ def test_content_packageset_report(juju: jubilant.Juju):
         startswith="<!DOCTYPE html>",
         contains="Packageset Report",
     )
+
+
+def test_archive_sync_timer_installed(juju: jubilant.Juju):
+    """The archive-sync timer is installed and active.
+
+    This exercises the local function of the charm without needing access to the
+    internal archive mirror: the systemd timer is installed and enabled. The
+    mirror directory (/var/cache/mirror/ubuntu) is internal and not served by
+    nginx.
+    """
+    timer_state = juju.ssh(
+        "ubuntu-static-reports/0", "systemctl is-active archive-sync.timer"
+    ).strip()
+    assert timer_state == "active"

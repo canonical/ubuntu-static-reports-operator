@@ -56,3 +56,23 @@ config:
         under ky lpoauthkey, to be used for services that need
         authenticated users.
       type: secret
+    rsync_archive_source:
+      description: |
+        rsync source for the Ubuntu archive indices (the dists tree), used by
+        update-archive-mirror to keep the local snapshot current. Defaults to
+        the public Ubuntu archive mirror; set to the internal ftp-master mirror
+        (ftpmaster.internal::ubuntu-dists/) on units that can reach it directly.
+      type: string
+      default: "rsync://rsync.archive.ubuntu.com/ubuntu/dists/"
+    mirror_dir:
+      description: |
+        Directory where update-archive-mirror and update-germinate publish
+        their snapshots: <mirror_dir>/archive/ holds the archive-index
+        snapshots, <mirror_dir>/germinate/ the combined archive+germinate
+        ones, each with a `current` symlink atomically updated to the latest
+        snapshot. Kept outside the web root so both stay on one filesystem
+        (needed for cheap hardlinking between them); germinate's `current` is
+        exposed at /germinate/ via a symlink the charm maintains. Defaults to
+        /var/cache/mirror/ubuntu.
+      type: string
+      default: "/var/cache/mirror/ubuntu"

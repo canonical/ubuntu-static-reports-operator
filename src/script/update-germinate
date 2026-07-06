@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""Germinate an archive snapshot and publish the combined result.
+
+Reads the latest archive snapshot from <archive>/current/ubuntu/, runs
+germinate-ubuntu against it, and publishes the combined result
+(archive indices + germinate output) as an atomic snapshot at
+<out>/current/. Consumers of the combined snapshot (update-mismatches) read
+from <out>/current/.
+
+<out> lives under mirror_dir, next to the archive snapshots produced by
+update-archive-mirror, so the two stay on the same filesystem and this script
+can cheaply hardlink the archive indices instead of copying them. The charm
+keeps a symlink at /srv/staticreports/www/germinate pointing at <out>/current
+so nginx serves it under /germinate/ without duplicating the storage.
+
+A rebuild only happens when the archive snapshot or the local seeds have
+changed since the last run.  Triggered by update-archive-mirror via systemd
+OnSuccess=; triggers update-mismatches via OnSuccess= in turn.
+
+Options can be overridden on the command line or via environment variables
+(the systemd unit sources /etc/staticreports/archive-mirror.env).
+"""
+
+import argparse
+import fcntl
+import logging
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+logger = logging.getLogger("update-germinate")
+
+HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    """Parse command-line options."""
+    parser = argparse.ArgumentParser(
+        description="Germinate and publish a combined archive+germinate snapshot."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Rebuild and publish even if no inputs changed.",
+    )
+    mirror_dir = Path(os.environ.get("MIRROR_DIR", "/var/cache/mirror/ubuntu"))
+    parser.add_argument(
+        "--archive",
+        type=Path,
+        default=mirror_dir / "archive",
+        help="Archive snapshot directory produced by update-archive-mirror.",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=mirror_dir / "germinate",
+        help="Directory to publish combined snapshots into (holds the 'current' symlink).",
+    )
+    parser.add_argument(
+        "--seed-source",
+        default="file:///srv/staticreports/www/seeds/",
+        help="Germinate seed base URL (the update-seeds output).",
+    )
+    parser.add_argument(
+        "--retention",
+        type=int,
+        default=int(os.environ.get("RETENTION", "3")),
+        help="Number of snapshots to keep (older ones are pruned).",
+    )
+    return parser.parse_args(argv)
+
+
+def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
+    logger.info("Running: %s", shlex.join(str(part) for part in cmd))
+    return subprocess.run(cmd, check=True, **kwargs)
+
+
+def _seeds_mtime(seed_source: str) -> float:
+    """Newest mtime under a local seed source (0 for a remote/absent one)."""
+    if not seed_source.startswith("file://"):
+        return 0.0
+    root = Path(seed_source[len("file://"):])
+    newest = 0.0
+    for path in root.rglob("*"):
+        if ".git" in path.parts:
+            continue
+        try:
+            newest = max(newest, path.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
+def _stamp_value(stamp: Path, key: str) -> str | None:
+    try:
+        for line in stamp.read_text().splitlines():
+            if line.startswith(f"{key}:"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        return None
+    return None
+
+
+def _previous_archive_snapshot(current: Path) -> str:
+    return _stamp_value(current / "STAMP", "Archive-snapshot") or ""
+
+
+def _previous_seeds_mtime(current: Path) -> float:
+    try:
+        return float(_stamp_value(current / "STAMP", "Seeds-mtime") or 0)
+    except ValueError:
+        return 0.0
+
+
+def run_germinate(staging: Path, seed_source: str) -> None:
+    """Germinate against the frozen archive copy in staging/ubuntu/."""
+    _run(
+        [
+            "germinate-ubuntu",
+            "-o",
+            str(staging / "germinate-release"),
+            "--archiveroot",
+            f"file://{staging / 'ubuntu'}",
+            "-S",
+            seed_source,
+        ],
+    )
+
+
+def _write_stamp(snapshot: Path, archive_snapshot_name: str, seeds_mt: float) -> None:
+    lines = [
+        f"Generated: {time.strftime('%a %b %e %H:%M:%S %Z %Y', time.gmtime())}",
+        f"Archive-snapshot: {archive_snapshot_name}",
+        f"Seeds-mtime: {seeds_mt}",
+        "Germination complete.",
+        "",
+    ]
+    (snapshot / "STAMP").write_text("\n".join(lines))
+
+
+def swap_current(publish_root: Path, snapshot: Path) -> None:
+    """Atomically repoint `current` at the new snapshot via a rename."""
+    tmp = publish_root / f".current.{os.getpid()}"
+    if tmp.is_symlink() or tmp.exists():
+        tmp.unlink()
+    tmp.symlink_to(snapshot.name)
+    os.replace(tmp, publish_root / "current")
+
+
+def gc_snapshots(publish_root: Path, retention: int) -> None:
+    """Keep the newest `retention` snapshots plus whatever `current` points at."""
+    current = publish_root / "current"
+    snapshots = sorted(publish_root.glob("snapshot.*"), key=lambda p: p.name)
+    keep = {s.name for s in snapshots[-retention:]}
+    if current.is_symlink():
+        keep.add(os.path.basename(os.readlink(current)))
+    for snapshot in snapshots:
+        if snapshot.name not in keep:
+            logger.info("Pruning old snapshot %s.", snapshot.name)
+            shutil.rmtree(snapshot, ignore_errors=True)
+
+
+def germinate_and_publish(
+    archive: Path,
+    out: Path,
+    seed_source: str,
+    retention: int = 3,
+    force: bool = False,
+) -> int:
+    """Run one germinate-and-publish cycle; returns 0 on success."""
+    current_archive = archive / "current"
+    current = out / "current"
+
+    if not current_archive.is_symlink() or not current_archive.exists():
+        logger.error(
+            "Archive current link %s missing; run update-archive-mirror first.",
+            current_archive,
+        )
+        return 1
+
+    archive_snapshot_name = os.path.basename(os.readlink(current_archive))
+    out.mkdir(parents=True, exist_ok=True)
+
+    lock_handle = open(HOME / ".update-germinate.lock", "w")
+    try:
+        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.info("Another update-germinate run is in progress; exiting.")
+        return 0
+
+    current_seeds = _seeds_mtime(seed_source)
+    have_current = current.is_symlink() and current.exists()
+    rebuild = (
+        force
+        or not have_current
+        or archive_snapshot_name != _previous_archive_snapshot(current)
+        or current_seeds > _previous_seeds_mtime(current)
+    )
+    if not rebuild:
+        logger.info("No archive or seed changes since last germinate snapshot; nothing to do.")
+        return 0
+
+    snapshot_name = "snapshot." + time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+    staging = out / f".staging.{snapshot_name}"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+
+    # Hardlink the archive indices from the current archive snapshot so a
+    # later archive-sync run cannot mutate the staged germinate tree.
+    _run(["cp", "-al", str(current_archive / "ubuntu"), str(staging / "ubuntu")])
+
+    try:
+        run_germinate(staging, seed_source)
+    except subprocess.CalledProcessError:
+        logger.error("germinate-ubuntu failed; keeping the previous snapshot.")
+        shutil.rmtree(staging, ignore_errors=True)
+        return 1
+
+    _write_stamp(staging, archive_snapshot_name, current_seeds)
+    snapshot = out / snapshot_name
+    os.rename(staging, snapshot)
+    swap_current(out, snapshot)
+    gc_snapshots(out, max(1, retention))
+    logger.info("Published germinate snapshot %s in %s.", snapshot.name, out)
+    return 0
+
+
+def main(argv=None) -> int:
+    """Entry point."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = parse_args(argv)
+    return germinate_and_publish(
+        archive=args.archive,
+        out=args.out,
+        seed_source=args.seed_source,
+        retention=args.retention,
+        force=args.force,
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

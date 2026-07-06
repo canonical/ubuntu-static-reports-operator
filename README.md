@@ -68,6 +68,24 @@ from various sources depending on the respective service.
   * Data: Pending SRUs in the `-proposed` pockets for all stable releases of Ubuntu
   * Previously presented at https://ubuntu-archive-team.ubuntu.com/pending-sru.html
 
+* update-archive-mirror
+  * TL;DR: Build and atomically publish one consistent archive-index snapshot that other services (update-germinate, NBS) share as a single source of truth
+  * Timing: every 30 minutes, but a new snapshot is only built and swapped in when the archive indices actually changed
+  * Execution time: seconds when nothing changed; under a minute for a full rsync
+  * Code: `update-archive-mirror`
+  * Data: A local rsync mirror of the archive indices (the `dists` tree) from the archive (configurable via `rsync_archive_source`)
+  * Re-used internally by update-germinate (and potentially NBS); not exposed directly via nginx
+
+* update-germinate
+  * TL;DR: Germinate the current archive-mirror snapshot against the published seeds, publishing the combined archive+germinate result for other services to consume
+  * Timing: after the archive mirror was updated
+  * Execution time: a few minutes when the snapshot changed, seconds otherwise
+  * Code: wrapper `update-germinate` is included in this charm; the germinate tool itself comes from https://git.launchpad.net/ubuntu-archive-tools
+  * Data: Current archive indices (from update-archive-mirror) and seeds (from update-seeds)
+  * Old location: https://ubuntu-archive-team.ubuntu.com/germinate-output/
+  * New location: https://static-reports.ubuntu.com/germinate/
+
+
 ## Basic usage
 
 Assuming you have access to a bootstrapped [Juju](https://juju.is) controller, you can deploy the charm with (For details on local manual debug see [CONTRIBUTING.md](CONTRIBUTING.md)):

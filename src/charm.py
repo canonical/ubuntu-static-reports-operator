@@ -117,6 +117,12 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
             return False
         logger.debug("config change done - url set")
 
+        self._staticreports.configure_archive_mirror(
+            archive_rsync_source=str(self.config.get("rsync_archive_source", "")),
+            mirror_dir=str(self.config.get("mirror_dir", "")),
+        )
+        logger.debug("config change done - archive-sync overrides written")
+
         lp_key_data = self._lpuser_lp_oauthkey
         if lp_key_data is None:
             logger.warning("Launchpad credentials unavailable, unable to gather uploaders.")
