@@ -31,7 +31,7 @@ ops==3.7.1
     #   ubuntu-static-reports-operator (pyproject.toml)
     #   charmlibs-pathops
     #   ops-scenario
-ops-scenario==8.7.1
+ops-scenario==8.8.0
     # via ops
 packaging==26.2
     # via pytest
