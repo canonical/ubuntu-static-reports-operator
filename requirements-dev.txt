@@ -54,7 +54,7 @@ requests==2.34.2
     # via ubuntu-static-reports-operator (pyproject.toml)
 ruff==0.15.20
     # via ubuntu-static-reports-operator (pyproject.toml)
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   opentelemetry-api
     #   pydantic
