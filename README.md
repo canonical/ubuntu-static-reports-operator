@@ -85,6 +85,14 @@ from various sources depending on the respective service.
   * Old location: https://ubuntu-archive-team.ubuntu.com/germinate-output/
   * New location: https://static-reports.ubuntu.com/germinate/
 
+* update-mismatches
+  * TL;DR: Generate the archive override mismatch reports (architecture, component, pocket, priority)
+  * Timing: after germinate completed
+  * Execution time: a few minutes when the snapshot changed, seconds otherwise
+  * Code: wrapper `update-mismatches` is included in this charm; the mismatch reports themselves come from https://git.launchpad.net/ubuntu-archive-tools
+  * Data: Current germinate snapshot (which already includes the archive indices)
+  * Old location: https://ubuntu-archive-team.ubuntu.com/ \*-mismatches.\*
+  * New location: https://static-reports.ubuntu.com/mismatches/
 
 ## Basic usage
 
@@ -126,7 +134,7 @@ next, the log output of each and more - use systemctl as the are all systemd
 timers and services.
 
 ```bash
-❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report
+❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report update-mismatches update-germinate update-archive-mirror
 ```
 
 Since the report execution is wrapped into systemd services, one can also use

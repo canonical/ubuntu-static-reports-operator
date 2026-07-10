@@ -20,8 +20,10 @@ PACKAGES = [
     "distro-info",
     "germinate",
     "git",
+    "graphviz",
     "nginx-light",
     "procmail",
+    "python3-apt",
     "python3-keyring",
     "python3-launchpadlib",
     "python3-yaml",
@@ -35,6 +37,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/archive-permissions"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/bugpatterns"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/pending-sru"), "ubuntu", "ubuntu"),
+    (Path("/srv/staticreports/www/mismatches"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 
@@ -57,11 +60,14 @@ UBUNTU_STATIC_REPORT_SERVICES = [
     "permissions-report",
     "sru-report",
     "update-archive-mirror",
+    "update-germinate",
+    "update-mismatches",
 ]
 
 LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
 
 ARCHIVE_MIRROR_ENV_PATH = "/etc/staticreports/archive-mirror.env"
+MISMATCHES_ENV_PATH = "/etc/staticreports/mismatches.env"
 
 # germinate's real (hardlink-friendly) storage lives under mirror_dir, next to
 # the archive snapshots; this is the stable web path symlinked to its `current`.
@@ -193,6 +199,7 @@ class StaticReports:
             shutil.copy("src/script/update-archive-mirror", "/usr/bin")
             shutil.copy("src/script/germinate-ubuntu", "/usr/bin")
             shutil.copy("src/script/update-germinate", "/usr/bin")
+            shutil.copy("src/script/update-mismatches", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:
@@ -297,6 +304,19 @@ class StaticReports:
         logger.debug(
             "configure_archive_mirror: relinked %s to %s", GERMINATE_WEB_PATH, germinate_current
         )
+
+    def configure_mismatches(self, mirror_dir: str):
+        """Write the mismatches environment overrides derived from charm config.
+
+        Writes ARCHIVE_ROOT so update-mismatches finds the combined
+        archive+germinate snapshot published by update-germinate. Empty
+        mirror_dir is omitted so the script falls back to its own default.
+        """
+        content = f"ARCHIVE_ROOT={mirror_dir}/germinate/current\n" if mirror_dir else ""
+        env_file = Path(MISMATCHES_ENV_PATH)
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(content, encoding="utf-8")
+        logger.debug("configure_mismatches: wrote mismatches configuration to %s", env_file)
 
     def refresh_report(self):
         """Refresh all the reports - wait for completion."""

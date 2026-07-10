@@ -1,0 +1,329 @@
+#!/usr/bin/env python3
+# Evolved from
+# https://git.launchpad.net/ubuntu-archive-scripts/tree/archive-reports
+"""Generate the Ubuntu archive "mismatches" reports for the static reports site.
+
+The reports run against the shared archive+germinate snapshot published by
+update-germinate (its `current` pointer), so the archive indices and germinate
+output they read are always one internally consistent state. This wrapper does
+no archive sync or germinate of its own; it simply regenerates the
+architecture/component/pocket/priority reports whenever `current` advances to
+a new snapshot.
+
+Options can be passed on the command line or, for charm/systemd use, via the
+matching environment variables (the CLI defaults below). CLI arguments win.
+"""
+
+import argparse
+import fcntl
+import logging
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+logger = logging.getLogger("update-mismatches")
+
+# The systemd unit runs this as User=ubuntu, so HOME is that account's home
+# directory. It anchors:
+#  - ~/mirror/ubuntu(-germinate[-proposed]): fixed paths the vendored
+#    ubuntu-archive-tools scripts below hard-code and cannot be pointed
+#    elsewhere, so we symlink them at each snapshot instead (see _relink).
+#  - ~/.update-mismatches.lock and ~/.update-mismatches.state: this script's
+#    own per-run lock and last-processed-snapshot marker.
+#  - ~/.config/lp-ubuntu-archive-unprivileged-bot.oauth: the Launchpad
+#    credentials file the charm writes for these tools to authenticate with.
+HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
+
+
+def _env_path(name: str, default: Path) -> Path:
+    value = os.environ.get(name)
+    return Path(value) if value else default
+
+
+@dataclass(frozen=True)
+class Config:
+    """Resolved settings for one run (CLI args over environment over defaults)."""
+
+    uat: Path
+    archive_root: Path
+    mirror: Path
+    germinate_dir: Path
+    germinate_proposed: Path
+    out: Path
+    state_file: Path
+    package_team_mapping: str
+    devel: str
+    force: bool
+
+
+def main(argv=None) -> int:
+    """Entry point."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    cfg = _build_config(_parse_args(argv))
+    return generate_reports(cfg)
+
+
+def generate_reports(cfg: Config) -> int:
+    """Generate mismatch reports from the current archive snapshot."""
+    cfg.out.mkdir(parents=True, exist_ok=True)
+
+    lock_handle = open(HOME / ".update-mismatches.lock", "w")
+    try:
+        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.info("Another update-mismatches run is in progress; exiting.")
+        return 0
+
+    snapshot = _resolve_snapshot(cfg)
+    if snapshot is None:
+        logger.info("No archive snapshot published at %s yet; nothing to do.", cfg.archive_root)
+        return 0
+    if not (snapshot / "STAMP").exists():
+        logger.warning("Snapshot %s has no STAMP; treating it as incomplete.", snapshot.name)
+        return 0
+
+    snapshot_id = snapshot.name
+    if not cfg.force and snapshot_id == _last_processed(cfg):
+        logger.info("Archive snapshot %s already processed; nothing to do.", snapshot_id)
+        return 0
+
+    logger.info("Processing archive snapshot %s.", snapshot_id)
+    if cfg.devel:
+        logger.info("Development series: %s", cfg.devel)
+
+    # Expose this snapshot through the paths the hard-coded tools read, so every
+    # report works against one consistent archive + germinate state.
+    _relink(cfg.mirror, snapshot / "ubuntu")
+    _relink(cfg.germinate_dir, snapshot / "germinate-release")
+    _relink(cfg.germinate_proposed, snapshot / "germinate-proposed")
+
+    failures = 0
+    for name, step in _report_steps(cfg):
+        logger.info("=== %s ===", name)
+        try:
+            step()
+        except subprocess.CalledProcessError as error:
+            logger.error("%s failed (rc=%s).", name, error.returncode)
+            failures += 1
+
+    if failures:
+        logger.error("%d mismatch report(s) failed.", failures)
+        return 1
+
+    _record_processed(cfg, snapshot_id)
+    logger.info("Mismatch reports updated in %s from snapshot %s.", cfg.out, snapshot_id)
+    return 0
+
+
+def _parse_args(argv=None) -> argparse.Namespace:
+    """Parse command-line options, defaulting to the charm/systemd env vars."""
+    parser = argparse.ArgumentParser(
+        description="Generate the Ubuntu archive mismatch reports from the archive snapshot."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate even if the current archive snapshot was already processed.",
+    )
+    parser.add_argument(
+        "--devel",
+        default=os.environ.get("DEVEL", ""),
+        help="Development series; autodetected via distro-info when omitted.",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("/srv/staticreports/www/mismatches"),
+        help="Directory to write the reports into.",
+    )
+    parser.add_argument(
+        "--archive-root",
+        type=Path,
+        default=Path(os.environ.get("ARCHIVE_ROOT", "/var/cache/mirror/ubuntu/germinate/current")),
+        help="Path to the update-germinate snapshot pointer to read.",
+    )
+    return parser.parse_args(argv)
+
+
+def _detect_devel_series() -> str:
+    """Return the current development series via distro-info, or "" if unknown."""
+    try:
+        result = subprocess.run(
+            ["distro-info", "--devel"], check=True, capture_output=True, text=True
+        )
+        return result.stdout.split()[0]
+    except (subprocess.CalledProcessError, FileNotFoundError, IndexError):
+        logger.warning("Could not autodetect the development series via distro-info.")
+        return ""
+
+
+def _build_config(args: argparse.Namespace) -> Config:
+    """Resolve a Config from CLI args, with the remaining paths from env/defaults."""
+    out = args.out
+    # arch/pocket/priority-mismatches hard-code ~/mirror/ubuntu(-germinate), so the
+    # snapshot is exposed to them through those symlinks; env-overridable for tests.
+    return Config(
+        uat=_env_path("UAT", Path("/usr/local/src/ubuntu-archive-tools")),
+        archive_root=args.archive_root,
+        mirror=_env_path("MIRROR", HOME / "mirror" / "ubuntu"),
+        germinate_dir=_env_path("GERMINATE_DIR", HOME / "mirror" / "ubuntu-germinate"),
+        germinate_proposed=_env_path(
+            "GERMINATE_PROPOSED", HOME / "mirror" / "ubuntu-germinate-proposed"
+        ),
+        out=out,
+        state_file=_env_path("STATE_FILE", HOME / ".update-mismatches.state"),
+        package_team_mapping=os.environ.get(
+            "PACKAGE_TEAM_MAPPING", str(out.parent / "package-team-mapping.json")
+        ),
+        devel=args.devel or _detect_devel_series(),
+        force=args.force,
+    )
+
+
+def _tool_env(cfg: Config) -> dict:
+    """Build the report-tool environment with charts.py/lputils.py importable."""
+    env = os.environ.copy()
+    pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = f"{cfg.uat}{os.pathsep}{pythonpath}" if pythonpath else str(cfg.uat)
+    env.setdefault(
+        "LP_CREDENTIALS_FILE",
+        str(HOME / ".config/lp-ubuntu-archive-unprivileged-bot.oauth"),
+    )
+    return env
+
+
+def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
+    """Run a command, raising CalledProcessError on failure."""
+    logger.info("Running: %s", shlex.join(str(part) for part in cmd))
+    return subprocess.run(cmd, check=True, **kwargs)
+
+
+def _resolve_snapshot(cfg: Config) -> Path | None:
+    """Resolve the archive root to a snapshot directory, or None if absent."""
+    try:
+        snapshot = cfg.archive_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    return snapshot if snapshot.is_dir() else None
+
+
+def _last_processed(cfg: Config) -> str:
+    try:
+        return cfg.state_file.read_text().strip()
+    except OSError:
+        return ""
+
+
+def _record_processed(cfg: Config, snapshot_id: str) -> None:
+    try:
+        cfg.state_file.write_text(snapshot_id)
+    except OSError:
+        logger.warning("Could not record processed snapshot id to %s.", cfg.state_file)
+
+
+def _relink(link: Path, target: Path) -> None:
+    """Point `link` at `target` (safe under our single-instance flock)."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or link.exists():
+        if link.is_dir() and not link.is_symlink():
+            shutil.rmtree(link)
+        else:
+            link.unlink()
+    link.symlink_to(target)
+
+
+def _component_report(cfg: Config, name: str, *extra: str) -> None:
+    _run(
+        [
+            str(cfg.uat / "component-mismatches"),
+            "-d",
+            str(cfg.out / f"{name}.dot"),
+            "-o",
+            str(cfg.out / f"{name}.txt"),
+            "--html-output-file",
+            str(cfg.out / f"{name}.html"),
+            "--csv-file",
+            str(cfg.out / f"{name}.csv"),
+            "--package-team-mapping",
+            cfg.package_team_mapping,
+            "--archive-dir",
+            str(cfg.mirror),
+            "--exclude",
+            "community-maas",
+            *extra,
+        ],
+        env=_tool_env(cfg),
+    )
+    _run(["dot", "-Tsvg", "-o", str(cfg.out / f"{name}.svg"), str(cfg.out / f"{name}.dot")])
+
+
+def _simple_report(cfg: Config, tool: str, *extra: str) -> None:
+    _run([str(cfg.uat / tool), *extra], env=_tool_env(cfg))
+
+
+def _report_steps(cfg: Config) -> list:
+    """Return the (name, callable) report steps to run, in order."""
+    steps = [("component-mismatches", lambda: _component_report(cfg, "component-mismatches"))]
+    if cfg.devel:
+        steps.append(
+            (
+                "component-mismatches-proposed",
+                lambda: _component_report(
+                    cfg,
+                    "component-mismatches-proposed",
+                    "-s",
+                    f"{cfg.devel}-proposed",
+                    "--germinate-path",
+                    str(cfg.germinate_proposed),
+                ),
+            )
+        )
+    steps += [
+        (
+            "architecture-mismatches",
+            lambda: _simple_report(
+                cfg,
+                "architecture-mismatches",
+                "-o",
+                str(cfg.out / "architecture-mismatches.txt"),
+                "--html-output-file",
+                str(cfg.out / "architecture-mismatches.html"),
+                "--csv-file",
+                str(cfg.out / "architecture-mismatches.csv"),
+            ),
+        ),
+        (
+            "priority-mismatches",
+            lambda: _simple_report(
+                cfg,
+                "priority-mismatches",
+                "-o",
+                str(cfg.out / "priority-mismatches.txt"),
+                "--html-output-file",
+                str(cfg.out / "priority-mismatches.html"),
+                "--csv-file",
+                str(cfg.out / "priority-mismatches.csv"),
+            ),
+        ),
+        (
+            "pocket-mismatches",
+            lambda: _simple_report(
+                cfg,
+                "pocket-mismatches",
+                "-o",
+                str(cfg.out / "pocket-mismatches.txt"),
+                "--html-output-file",
+                str(cfg.out / "pocket-mismatches.html"),
+            ),
+        ),
+    ]
+    return steps
+
+
+
+if __name__ == "__main__":
+    sys.exit(main())

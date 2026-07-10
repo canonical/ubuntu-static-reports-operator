@@ -1,5 +1,6 @@
 [Unit]
 Description=Ubuntu Static Reports - Germinate archive snapshot
+OnSuccess=update-mismatches.service
 
 [Service]
 Type=oneshot

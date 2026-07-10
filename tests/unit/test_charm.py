@@ -9,6 +9,7 @@ and do not attempt to manipulate the underlying machine.
 
 from subprocess import CalledProcessError
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import ops
@@ -43,6 +44,13 @@ def base_state(ctx):
 def mock_configure_archive_mirror():
     """Stub configure_archive_mirror so unit tests never write to the host."""
     with patch("charm.StaticReports.configure_archive_mirror") as mock:
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_configure_mismatches():
+    """Stub configure_mismatches so unit tests never write to the host."""
+    with patch("charm.StaticReports.configure_mismatches") as mock:
         yield mock
 
 
@@ -151,6 +159,17 @@ def test_config_changed_event_writes_archive_mirror_overrides_from_config(
         archive_rsync_source="rsync://host/dists/",
         mirror_dir="/srv/mirror",
     )
+
+
+def test_config_changed_event_writes_mismatches_overrides_from_config(
+    mock_configure_mismatches, ctx
+):
+    """The mirror_dir config option is forwarded to configure_mismatches."""
+    state = State(leader=True, config={"mirror_dir": "/srv/mirror"})
+
+    ctx.run(ctx.on.config_changed(), state)
+
+    mock_configure_mismatches.assert_called_once_with(mirror_dir="/srv/mirror")
 
 
 @patch(
@@ -348,8 +367,9 @@ def test_lpuser_secret_property_returns_none_when_secret_not_found():
     dummy.config = {"lpuser_secret_id": "missing"}
     dummy.model = MagicMock()
     dummy.model.get_secret.side_effect = ops.SecretNotFoundError
+    charm = cast(UbuntuStaticReportsCharm, dummy)
 
-    result = UbuntuStaticReportsCharm._lpuser_secret.fget(dummy)
+    result = UbuntuStaticReportsCharm._lpuser_secret.fget(charm)
 
     assert result is None
 
@@ -364,7 +384,8 @@ def test_lpuser_lp_oauthkey_property_returns_none_when_key_missing_from_secret()
     fake_secret = MagicMock()
     fake_secret.get_content.return_value = {}
     dummy._lpuser_secret = fake_secret
+    charm = cast(UbuntuStaticReportsCharm, dummy)
 
-    result = UbuntuStaticReportsCharm._lpuser_lp_oauthkey.fget(dummy)
+    result = UbuntuStaticReportsCharm._lpuser_lp_oauthkey.fget(charm)
 
     assert result is None

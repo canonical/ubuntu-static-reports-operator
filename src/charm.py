@@ -123,6 +123,11 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         )
         logger.debug("config change done - archive-sync overrides written")
 
+        self._staticreports.configure_mismatches(
+            mirror_dir=str(self.config.get("mirror_dir", "")),
+        )
+        logger.debug("config change done - mismatches overrides written")
+
         lp_key_data = self._lpuser_lp_oauthkey
         if lp_key_data is None:
             logger.warning("Launchpad credentials unavailable, unable to gather uploaders.")

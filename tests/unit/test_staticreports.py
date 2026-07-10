@@ -85,6 +85,7 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     assert ("copy", "src/script/update-archive-mirror", "/usr/bin") in ops
     assert ("copy", "src/script/germinate-ubuntu", "/usr/bin") in ops
     assert ("copy", "src/script/update-germinate", "/usr/bin") in ops
+    assert ("copy", "src/script/update-mismatches", "/usr/bin") in ops
     assert (
         "copy",
         "src/nginx/staticreports.conf",
@@ -332,6 +333,24 @@ def test_configure_url_logs_configured_url(caplog):
     assert "The url in use is http://example.local:80" in caplog.text
 
 
+def test_configure_mismatches_writes_archive_root_from_mirror_dir(monkeypatch):
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
+    sr = staticreports.StaticReports()
+
+    sr.configure_mismatches("/srv/mirror")
+
+    content = written[staticreports.MISMATCHES_ENV_PATH]
+    assert content == "ARCHIVE_ROOT=/srv/mirror/germinate/current\n"
+
+
 def test_configure_archive_mirror_writes_overrides(monkeypatch):
     written = {}
     monkeypatch.setattr(
@@ -381,6 +400,10 @@ def test_configure_archive_mirror_relinks_germinate_to_default_when_mirror_dir_e
 
 def test_update_germinate_is_a_registered_report_service():
     assert "update-germinate" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
+
+
+def test_update_mismatches_is_a_registered_report_service():
+    assert "update-mismatches" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
 
 
 def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
@@ -497,7 +520,7 @@ def test_staticreports_init_configures_proxy_environment_from_juju_vars(monkeypa
 
 
 @patch("staticreports.pathops.LocalPath")
-def test_configure_lpoauthkey_returns_false_on_write_errors(localpathmock):
+def test_configure_lpoauthkey_returns_false_on_write_errors(localpathmock, monkeypatch):
     """Test configure_lpoauthkey handles write errors gracefully.
 
     configure_lpoauthkey should gracefully handle file write errors by returning False
@@ -506,33 +529,11 @@ def test_configure_lpoauthkey_returns_false_on_write_errors(localpathmock):
     inst = localpathmock.return_value
     inst.parent = Path("/nonexistent/home/ubuntu")
     sr = StaticReports()
-    import os as _os
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda *a, **k: None)
 
-    _os_makedirs = _os.makedirs
-
-    # Test FileNotFoundError
-    inst.write_text.side_effect = FileNotFoundError()
-    try:
-        _os.makedirs = lambda *a, **k: None
+    for error in (FileNotFoundError(), LookupError(), PermissionError()):
+        inst.write_text.side_effect = error
         assert sr.configure_lpoauthkey("data") is False
-    finally:
-        _os.makedirs = _os_makedirs
-
-    # Test LookupError
-    inst.write_text.side_effect = LookupError()
-    try:
-        _os.makedirs = lambda *a, **k: None
-        assert sr.configure_lpoauthkey("data") is False
-    finally:
-        _os.makedirs = _os_makedirs
-
-    # Test PermissionError
-    inst.write_text.side_effect = PermissionError()
-    try:
-        _os.makedirs = lambda *a, **k: None
-        assert sr.configure_lpoauthkey("data") is False
-    finally:
-        _os.makedirs = _os_makedirs
 
 
 def test_sru_report_is_a_managed_static_report_service():
