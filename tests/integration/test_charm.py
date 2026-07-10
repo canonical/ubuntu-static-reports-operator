@@ -164,33 +164,35 @@ def test_content_packageset_report(juju: jubilant.Juju):
     )
 
 
-def test_archive_sync_timer_installed(juju: jubilant.Juju):
-    """The archive-sync timer is installed and active.
+def test_all_timers_are_active(juju: jubilant.Juju):
+    """All report-service timers are installed and active after deploy."""
+    timers = [
+        "update-bugpatterns",
+        "update-sync-blocklist",
+        "update-seeds",
+        "packageset-report",
+        "package-subscribers",
+        "permissions-report",
+        "sru-report",
+        "update-archive-mirror",
+    ]
+    for timer in timers:
+        state = juju.ssh("ubuntu-static-reports/0", f"systemctl is-active {timer}.timer").strip()
+        assert state == "active", f"{timer}.timer is not active"
 
-    This exercises the local function of the charm without needing access to the
-    internal archive mirror: the systemd timer is installed and enabled. The
-    mirror directory (/var/cache/mirror/ubuntu) is internal and not served by
-    nginx.
-    """
-    timer_state = juju.ssh(
-        "ubuntu-static-reports/0", "systemctl is-active archive-sync.timer"
-    ).strip()
-    assert timer_state == "active"
+
+def test_oncomplete_services_are_enabled(juju: jubilant.Juju):
+    """Services triggered via OnSuccess= are installed and enabled after deploy."""
+    services = ["update-germinate", "update-mismatches"]
+    for service in services:
+        state = juju.ssh(
+            "ubuntu-static-reports/0", f"systemctl is-enabled {service}.service"
+        ).strip()
+        assert state == "enabled", f"{service}.service is not enabled"
 
 
-def test_update_mismatches_service_installed_and_path_served(juju: jubilant.Juju):
-    """The update-mismatches service is installed and its web path is served.
-
-    This exercises the local function of the charm without needing access to the
-    internal archive mirror: the service is installed and enabled (triggered via
-    OnSuccess from update-archive-mirror) and the (initially empty) report
-    directory is published by nginx.
-    """
-    service_state = juju.ssh(
-        "ubuntu-static-reports/0", "systemctl is-enabled update-mismatches.service"
-    ).strip()
-    assert service_state == "enabled"
-
+def test_mismatches_path_is_served(juju: jubilant.Juju):
+    """The (initially empty) mismatches report directory is served by nginx."""
     response = requests.get(f"http://{address(juju)}:80/mismatches/", timeout=30)
     assert response.status_code == 200
 
