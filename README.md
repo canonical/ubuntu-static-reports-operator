@@ -18,7 +18,8 @@ from various sources depending on the respective service.
   * Execution time: <30 seconds
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-sync-blocklist
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist/tree/sync-blocklist.txt
-  * Presented: at https://ubuntu-archive-team.ubuntu.com/sync-blocklist.txt
+  * Old location: https://ubuntu-archive-team.ubuntu.com/sync-blocklist.txt
+  * New location: https://static-reports.ubuntu.com/sync-blocklist.txt
 
 * update-seeds
   * TL;DR: conversion of git branches about the seeds into directories, avoids pressure on the git servers
@@ -26,7 +27,8 @@ from various sources depending on the respective service.
   * Execution time: ~13 minutes initially, 1 minute on updates
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
   * Data: Maintained in git at `https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}`
-  * Presented at https://ubuntu-archive-team.ubuntu.com/seeds/
+  * Old location: https://ubuntu-archive-team.ubuntu.com/seeds/
+  * New location: https://static-reports.ubuntu.com/seeds/
 
 * package-subscribers
   * TL;DR: convert LP API information about package subscribers to json for faster consumption by other tools
@@ -34,7 +36,8 @@ from various sources depending on the respective service.
   * Execution time: ~3 min
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/package-subscribers
   * Data: Structural subscriptions in Launchpad of registered teams to source packages
-  * Presented at: https://ubuntu-archive-team.ubuntu.com/package-team-mapping.json
+  * Old location: https://ubuntu-archive-team.ubuntu.com/package-team-mapping.json
+  * New location: https://static-reports.ubuntu.com/package-team-mapping.json
 
 * permissions-report
   * TL;DR: Convert LP API data into a report about package upload ACLs
@@ -42,7 +45,8 @@ from various sources depending on the respective service.
   * Execution time: ~30 minutes
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Per Package ACLs stored in Launchpad
-  * Presented at https://ubuntu-archive-team.ubuntu.com/archive-permissions/
+  * Old location: https://ubuntu-archive-team.ubuntu.com/archive-permissions/
+  * New location: https://static-reports.ubuntu.com/archive-permissions/
 
 * packageset-report
   * TL;DR: Convert LP API data into a report about package sets as used for upload permissions
@@ -50,7 +54,8 @@ from various sources depending on the respective service.
   * Execution time: ~30 minutes
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Package Set information stored in Launchpad
-  * Presented at https://ubuntu-archive-team.ubuntu.com/packagesets/
+  * Old location: https://ubuntu-archive-team.ubuntu.com/packagesets/
+  * New location: https://static-reports.ubuntu.com/packagesets/
 
 * update-bugpatterns
   * TL;DR: git checkout and serve as XML avoiding pressure on the cgit frontend
@@ -58,7 +63,8 @@ from various sources depending on the respective service.
   * Execution time: <30 seconds
   * Code: included in this charm
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-bugcontrol/apport/+git/ubuntu-bugpatterns
-  * Presented at https://ubuntu-archive-team.ubuntu.com/bugpatterns/bugpatterns.xml
+  * Old location: https://ubuntu-archive-team.ubuntu.com/bugpatterns/bugpatterns.xml
+  * New location: https://static-reports.ubuntu.com/bugpatterns/bugpatterns.xml
 
 * sru-report
   * TL;DR: generate the Pending Ubuntu SRU report
@@ -66,7 +72,8 @@ from various sources depending on the respective service.
   * Execution time: up to several hours (8h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/sru-report
   * Data: Pending SRUs in the `-proposed` pockets for all stable releases of Ubuntu
-  * Previously presented at https://ubuntu-archive-team.ubuntu.com/pending-sru.html
+  * Old location: https://ubuntu-archive-team.ubuntu.com/pending-sru.html
+  * New location: https://static-reports.ubuntu.com/pending-sru/pending-sru.html
 
 * update-archive-mirror
   * TL;DR: Build and atomically publish one consistent archive-index snapshot that other services (update-germinate, NBS) share as a single source of truth
