@@ -327,11 +327,15 @@ class StaticReports:
             logger.debug("Refreshing of the tracker failed: %s", e.stdout)
             raise
 
-    def setup_systemd_unit(self, service):
+    def setup_systemd_unit(self, service):  # noqa: C901
         """Set up the requested service and timer with proxy configuration."""
         logger.debug("Setting up systemd unit for %s", service)
         systemd_unit_location = Path("/etc/systemd/system")
         systemd_unit_location.mkdir(parents=True, exist_ok=True)
+
+        # A unit already on disk means a previous install/upgrade managed it, so it
+        # may have been manually disabled since; a missing unit means it's new.
+        already_present = (systemd_unit_location / f"{service}.service").exists()
 
         systemd_service = Path(f"src/systemd/{service}.service")
         service_content = systemd_service.read_text(encoding="utf-8")
@@ -364,6 +368,11 @@ class StaticReports:
             )
         logger.debug("Systemd units for %s written to %s", service, systemd_unit_location)
 
+        unit_name = f"{service}.timer" if timer_content is not None else f"{service}.service"
+        if already_present and self._unit_is_disabled(unit_name):
+            logger.debug("%s was manually disabled; leaving it disabled", unit_name)
+            return
+
         if timer_content is not None:
             logger.debug("Enabling and starting %s.timer", service)
             try:
@@ -379,6 +388,20 @@ class StaticReports:
                 logger.error("Failed to enable %s.service: %s", service, e)
                 raise
         logger.debug("Systemd unit %s enabled and started", service)
+
+    def _unit_is_disabled(self, unit_name: str) -> bool:
+        """Return True if `unit_name` is currently disabled per `systemctl is-enabled`.
+
+        Used only to decide whether a manually-disabled unit should be left
+        alone across installs/upgrades; any other status (enabled, static,
+        not-found, etc.) is treated as "not disabled" so it gets (re-)enabled.
+        """
+        try:
+            result = run(["systemctl", "is-enabled", unit_name], capture_output=True, text=True)
+        except OSError as e:
+            logger.warning("Failed to query enabled state of %s: %s", unit_name, e)
+            return False
+        return result.stdout.strip() == "disabled"
 
     def setup_systemd_units(self):
         """Set up all needed systemd services and timers."""

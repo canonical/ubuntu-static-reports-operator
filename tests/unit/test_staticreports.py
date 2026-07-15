@@ -9,6 +9,7 @@ pathlib writes) so they can run as unit tests without touching the host.
 
 from pathlib import Path
 from subprocess import CalledProcessError
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -423,6 +424,104 @@ def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
 
     with pytest.raises(CalledProcessError):
         sr.setup_systemd_unit("update-seeds")
+
+
+def test_setup_systemd_unit_skips_enabling_when_existing_unit_manually_disabled(monkeypatch):
+    """A unit already present on disk and disabled via systemctl should stay disabled."""
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self, encoding=None: "[Service]\n[Timer]"
+    )
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+
+    def fake_exists(self):
+        # Both the shipped timer definition and the already-installed unit exist.
+        return (
+            self.parent.name == "systemd"
+            or str(self) == "/etc/systemd/system/update-seeds.service"
+        )
+
+    monkeypatch.setattr(staticreports.Path, "exists", fake_exists)
+
+    enabled = []
+    monkeypatch.setattr(
+        staticreports.systemd, "service_enable", lambda *args, **kwargs: enabled.append(args)
+    )
+
+    fake_result = SimpleNamespace(stdout="disabled\n")
+    monkeypatch.setattr(staticreports, "run", lambda *args, **kwargs: fake_result)
+
+    sr = staticreports.StaticReports()
+    sr.setup_systemd_unit("update-seeds")
+
+    assert enabled == []
+    assert "/etc/systemd/system/update-seeds.service" in written
+
+
+def test_setup_systemd_unit_enables_existing_unit_when_still_enabled(monkeypatch):
+    """A previously-installed unit that is still enabled continues to be (re-)enabled."""
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self, encoding=None: "[Service]\n[Timer]"
+    )
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text, encoding=None: None)
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+
+    def fake_exists(self):
+        return (
+            self.parent.name == "systemd"
+            or str(self) == "/etc/systemd/system/update-seeds.service"
+        )
+
+    monkeypatch.setattr(staticreports.Path, "exists", fake_exists)
+
+    enabled = []
+    monkeypatch.setattr(
+        staticreports.systemd, "service_enable", lambda *args, **kwargs: enabled.append(args)
+    )
+
+    fake_result = SimpleNamespace(stdout="enabled\n")
+    monkeypatch.setattr(staticreports, "run", lambda *args, **kwargs: fake_result)
+
+    sr = staticreports.StaticReports()
+    sr.setup_systemd_unit("update-seeds")
+
+    assert enabled and enabled[0][0] == "--now"
+
+
+def test_setup_systemd_unit_enables_new_unit_without_checking_enabled_state(monkeypatch):
+    """A unit not yet installed (new service) is enabled without querying systemctl."""
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self, encoding=None: "[Service]\n[Timer]"
+    )
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text, encoding=None: None)
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(staticreports.Path, "exists", lambda self: self.parent.name == "systemd")
+
+    enabled = []
+    monkeypatch.setattr(
+        staticreports.systemd, "service_enable", lambda *args, **kwargs: enabled.append(args)
+    )
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("systemctl is-enabled should not be queried for a new unit")
+
+    monkeypatch.setattr(staticreports, "run", fail_run)
+
+    sr = staticreports.StaticReports()
+    sr.setup_systemd_unit("update-seeds")
+
+    assert enabled and enabled[0][0] == "--now"
 
 
 def test_refresh_report_logs_stdout_when_service_start_fails(monkeypatch, caplog):
