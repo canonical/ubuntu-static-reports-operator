@@ -47,8 +47,76 @@ def test_install_packages_raises_when_apt_update_fails(monkeypatch):
         sr._install_packages()
 
 
+UNATTENDED_UPGRADES_SAMPLE_CONFIG = """Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}";
+    "${distro_id}:${distro_codename}-security";
+    // only security is enabled by default
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+//  "${distro_id}:${distro_codename}-updates";
+//  "${distro_id}:${distro_codename}-proposed";
+//  "${distro_id}:${distro_codename}-backports";
+};
+"""
+
+
+def test_configure_unattended_upgrades_enables_auto_updates_via_dpkg_reconfigure(monkeypatch):
+    run_calls = []
+
+    def fake_run(cmd, **kwargs):
+        run_calls.append(cmd)
+        return Mock()
+
+    monkeypatch.setattr(staticreports, "run", fake_run)
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self: UNATTENDED_UPGRADES_SAMPLE_CONFIG
+    )
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text: None)
+    sr = staticreports.StaticReports()
+
+    sr._configure_unattended_upgrades()
+
+    assert ["debconf-set-selections"] in run_calls
+    assert ["dpkg-reconfigure", "-f", "noninteractive", "unattended-upgrades"] in run_calls
+
+
+def test_configure_unattended_upgrades_enables_updates_pocket_in_allowed_origins(monkeypatch):
+    monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self: UNATTENDED_UPGRADES_SAMPLE_CONFIG
+    )
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path, "write_text", lambda self, text: written.__setitem__(str(self), text)
+    )
+    sr = staticreports.StaticReports()
+
+    sr._configure_unattended_upgrades()
+
+    content = written[str(staticreports.UNATTENDED_UPGRADES_CONFIG_PATH)]
+    assert '    "${distro_id}:${distro_codename}-updates";' in content
+    assert '//  "${distro_id}:${distro_codename}-proposed";' in content
+    assert '//  "${distro_id}:${distro_codename}-backports";' in content
+
+
+def test_configure_unattended_upgrades_raises_when_dpkg_reconfigure_fails(monkeypatch):
+    def bad_run(cmd, **kwargs):
+        if cmd[0] == "dpkg-reconfigure":
+            raise CalledProcessError(1, cmd)
+        return Mock()
+
+    monkeypatch.setattr(staticreports, "run", bad_run)
+    sr = staticreports.StaticReports()
+
+    with pytest.raises(CalledProcessError):
+        sr._configure_unattended_upgrades()
+
+
 def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
 
     run_mock = Mock()
     monkeypatch.setattr(staticreports, "run", run_mock)
@@ -98,6 +166,9 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
 
 def test_install_raises_when_script_copy_fails(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
@@ -306,6 +377,9 @@ def test_install_packages_raises_when_package_installation_fails(monkeypatch):
 
 def test_install_raises_when_directory_creation_fails(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)
     monkeypatch.setattr(
@@ -575,6 +649,9 @@ def test_install_clones_git_repositories_into_configured_targets(monkeypatch, tm
 
     monkeypatch.setattr(staticreports, "run", fake_run)
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     sr = staticreports.StaticReports()
 
     sr.install()
@@ -600,6 +677,9 @@ def test_install_raises_when_git_clone_fails(monkeypatch):
 
     monkeypatch.setattr(staticreports, "run", bad_run)
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     sr = staticreports.StaticReports()
 
     with pytest.raises(CalledProcessError):
@@ -641,6 +721,9 @@ def test_sru_report_is_a_managed_static_report_service():
 
 def test_install_copies_sru_report_script_to_usr_bin(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     monkeypatch.setattr(staticreports, "run", Mock())
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
@@ -657,6 +740,9 @@ def test_install_copies_sru_report_script_to_usr_bin(monkeypatch):
 
 def test_install_creates_pending_sru_output_directory(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     monkeypatch.setattr(staticreports, "run", Mock())
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)

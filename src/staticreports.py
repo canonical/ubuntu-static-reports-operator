@@ -5,6 +5,7 @@
 
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 from subprocess import PIPE, STDOUT, CalledProcessError, SubprocessError, run
@@ -28,6 +29,7 @@ PACKAGES = [
     "python3-launchpadlib",
     "python3-yaml",
     "rsync",
+    "unattended-upgrades",
 ]
 
 SRV_DIRS = [
@@ -50,6 +52,8 @@ REPO_URLS = [
 ]
 
 NGINX_SITE_CONFIG_PATH = Path("/etc/nginx/conf.d/staticreports.conf")
+
+UNATTENDED_UPGRADES_CONFIG_PATH = Path("/etc/apt/apt.conf.d/50unattended-upgrades")
 
 UBUNTU_STATIC_REPORT_SERVICES = [
     "update-bugpatterns",
@@ -130,12 +134,52 @@ class StaticReports:
                 logger.error("Failed to install %s: %s", package, e)
                 raise
 
+    def _configure_unattended_upgrades(self):
+        """Enable unattended-upgrades, extended to the -updates pocket (not just security)."""
+        try:
+            run(
+                ["debconf-set-selections"],
+                input="unattended-upgrades unattended-upgrades/enable_auto_updates boolean true\n",
+                check=True,
+                text=True,
+            )
+            run(
+                ["dpkg-reconfigure", "-f", "noninteractive", "unattended-upgrades"],
+                check=True,
+                stdout=PIPE,
+                stderr=STDOUT,
+                text=True,
+            )
+            logger.debug("unattended-upgrades enabled via dpkg-reconfigure")
+        except (CalledProcessError, SubprocessError) as e:
+            logger.error("Failed to enable unattended-upgrades: %s", e)
+            raise
+
+        try:
+            config = UNATTENDED_UPGRADES_CONFIG_PATH.read_text()
+            # enable updates pocket to get new distro-info and germinate versions.
+            updated = re.sub(
+                r'^//(?=\s*"\$\{distro_id\}:\$\{distro_codename\}-updates";)',
+                "  ",
+                config,
+                flags=re.MULTILINE,
+            )
+            if updated != config:
+                UNATTENDED_UPGRADES_CONFIG_PATH.write_text(updated)
+                logger.debug("Enabled -updates pocket in %s", UNATTENDED_UPGRADES_CONFIG_PATH)
+        except OSError as e:
+            logger.error("Failed to update %s: %s", UNATTENDED_UPGRADES_CONFIG_PATH, e)
+            raise
+
     def install(self):
         """Set up the environment required for the static reports."""
         logger.info("Install required deb packages")
         self._install_packages()
 
-        logger.info("Install 1/4 Create the required directories")
+        logger.info("Install 1/5 Configuring automatic security and stable updates")
+        self._configure_unattended_upgrades()
+
+        logger.info("Install 2/5 Create the required directories")
         for dir_path, dir_user, dir_group in SRV_DIRS:
             try:
                 os.makedirs(dir_path, exist_ok=True)
@@ -147,7 +191,7 @@ class StaticReports:
                 logger.warning("Creating directory %s failed: %s", dir_path, e)
                 raise
 
-        logger.info("Install 2/4 Updating repositories")
+        logger.info("Install 3/5 Updating repositories")
         for repo_url, repo_branch, repo_target in REPO_URLS:
             logger.debug("Handle repository %s", repo_url)
             try:
@@ -190,7 +234,7 @@ class StaticReports:
                 logger.warning("Git handling %s failed: %s", repo_url, e)
                 raise
 
-        logger.info("Install 3/4 Installing App and Config files")
+        logger.info("Install 4/5 Installing App and Config files")
         try:
             shutil.copy("src/script/update-bugpatterns", "/usr/bin")
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
@@ -206,7 +250,7 @@ class StaticReports:
             logger.warning("Error copying files: %s", str(e))
             raise
 
-        logger.info("Install 4/4 Removing default Nginx configuration")
+        logger.info("Install 5/5 Removing default Nginx configuration")
         Path("/etc/nginx/sites-enabled/default").unlink(missing_ok=True)
 
     def start(self):
