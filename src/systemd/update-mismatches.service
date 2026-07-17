@@ -1,5 +1,7 @@
 [Unit]
 Description=Ubuntu Static Reports - Archive Mismatches reports
+# launchpad creds are actually not needed
+# upstream fix: https://code.launchpad.net/~jj/ubuntu-archive-tools/+git/ubuntu-archive-tools/+merge/508627
 ConditionFileNotEmpty=/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth
 
 [Service]
