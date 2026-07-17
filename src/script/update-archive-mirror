@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""Keep an incremental archive-indices mirror and publish atomic snapshots.
+
+Rsyncs the archive indices into a persistent work directory, then—when
+something changed—freezes a hardlink copy as a new snapshot and atomically
+repoints <out>/current at it.  Downstream consumers (NBS, germinate) read
+from <out>/current/ubuntu/.
+
+A new snapshot is only published when the archive indices actually changed;
+most timer ticks exit cheaply after the rsync.  update-germinate is
+triggered on success via systemd OnSuccess=.
+
+Options can be overridden on the command line or via environment variables
+(the systemd unit sources /etc/staticreports/archive-mirror.env).
+"""
+
+import argparse
+import fcntl
+import logging
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from distro_info import UbuntuDistroInfo
+
+logger = logging.getLogger("update-archive-mirror")
+
+HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    """Parse command-line options."""
+    parser = argparse.ArgumentParser(
+        description="Publish an atomic archive-indices snapshot."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Rebuild and publish even if no archive inputs changed.",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path(os.environ.get("MIRROR_DIR", "/var/cache/mirror/ubuntu")) / "archive",
+        help="Directory to publish archive snapshots into (holds the 'current' symlink).",
+    )
+    parser.add_argument(
+        "--archive-rsync-source",
+        default=os.environ.get("RSYNC_ARCHIVE_SOURCE", "rsync://rsync.archive.ubuntu.com/ubuntu/dists/"),
+        help="rsync source for the archive indices (the dists tree).",
+    )
+    parser.add_argument(
+        "--retention",
+        type=int,
+        default=int(os.environ.get("RETENTION", "3")),
+        help="Number of snapshots to keep (older ones are pruned).",
+    )
+    return parser.parse_args(argv)
+
+
+def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
+    """Run a command, raising CalledProcessError on failure."""
+    logger.info("Running: %s", shlex.join(str(part) for part in cmd))
+    return subprocess.run(cmd, check=True, **kwargs)
+
+
+def _release_mtimes(mirror: Path) -> dict:
+    """Map each mirrored Release file to its mtime (0 when unreadable)."""
+    snapshot = {}
+    for release in (mirror / "dists").glob("*/Release"):
+        try:
+            snapshot[str(release)] = release.stat().st_mtime
+        except OSError:
+            snapshot[str(release)] = 0
+    return snapshot
+
+
+def _eol_series() -> list[str]:
+    """Return known-EOL series to exclude from the rsync filter.
+
+    Any series not yet present in distro_info (e.g. a freshly-opened
+    development pocket) is implicitly kept: it won't appear in info.all
+    and therefore won't be added to the exclude list.
+    """
+    info = UbuntuDistroInfo()
+    active = set(info.supported()) | set(info.supported_esm())
+    try:
+        active.add(info.devel())
+    except Exception:
+        pass
+    return [s for s in info.all if s not in active]
+
+
+def rsync_archive(mirror: Path, source: str) -> None:
+    """Mirror the archive indices (never the pool), skipping unsupported series."""
+    series_filters = []
+    for series in _eol_series():
+        series_filters += ["--exclude", f"{series}*"]
+
+    file_filters = []
+    for pattern in ("Packages*", "Sources*", "Release*", "udeb.list", "**/installer-*/current"):
+        file_filters += ["--include", pattern]
+
+    _run(
+        [
+            "rsync",
+            "-aq",
+            *series_filters,
+            *file_filters,
+            "--include",
+            "*/",
+            "--exclude",
+            "*",
+            "--delete",
+            "--delete-excluded",
+            "--prune-empty-dirs",
+            source,
+            f"{mirror}/dists/",
+        ]
+    )
+
+
+def _write_stamp(snapshot: Path, releases: dict) -> None:
+    lines = [
+        f"Generated: {time.strftime('%a %b %e %H:%M:%S %Z %Y', time.gmtime())}",
+        f"Release-files: {len(releases)}",
+        "",
+    ]
+    (snapshot / "STAMP").write_text("\n".join(lines))
+
+
+def swap_current(publish_root: Path, snapshot: Path) -> None:
+    """Atomically repoint `current` at the new snapshot via a rename."""
+    tmp = publish_root / f".current.{os.getpid()}"
+    if tmp.is_symlink() or tmp.exists():
+        tmp.unlink()
+    tmp.symlink_to(snapshot.name)
+    os.replace(tmp, publish_root / "current")
+
+
+def gc_snapshots(publish_root: Path, retention: int) -> None:
+    """Keep the newest `retention` snapshots plus whatever `current` points at."""
+    current = publish_root / "current"
+    snapshots = sorted(publish_root.glob("snapshot.*"), key=lambda p: p.name)
+    keep = {s.name for s in snapshots[-retention:]}
+    if current.is_symlink():
+        keep.add(os.path.basename(os.readlink(current)))
+    for snapshot in snapshots:
+        if snapshot.name not in keep:
+            logger.info("Pruning old snapshot %s.", snapshot.name)
+            shutil.rmtree(snapshot, ignore_errors=True)
+
+
+def sync_and_publish(
+    out: Path,
+    archive_rsync_source: str,
+    retention: int = 3,
+    force: bool = False,
+) -> int:
+    """Run one sync-and-publish cycle; returns 0 on success."""
+    work = out / "work"
+    mirror = work / "ubuntu"
+    current = out / "current"
+
+    mirror.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
+
+    lock_handle = open(HOME / ".update-archive-mirror.lock", "w")
+    try:
+        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.info("Another update-archive-mirror run is in progress; exiting.")
+        return 0
+
+    before = _release_mtimes(mirror)
+    try:
+        rsync_archive(mirror, archive_rsync_source)
+    except subprocess.CalledProcessError:
+        logger.error("Archive index rsync from %s failed.", archive_rsync_source)
+        return 1
+    after = _release_mtimes(mirror)
+
+    have_current = current.is_symlink() and current.exists()
+    rebuild = force or not have_current or before != after
+    if not rebuild:
+        logger.info("No archive changes since last snapshot; nothing to do.")
+        return 0
+
+    snapshot_name = "snapshot." + time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+    staging = out / f".staging.{snapshot_name}"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+
+    # Build the archive snapshot inside a hidden staging directory so the
+    # final snapshot.<timestamp> entry only appears once fully written.
+    # Freeze the just-synced indices with hardlinks so a later rsync into
+    # the work mirror cannot mutate the staged snapshot.
+    _run(["cp", "-al", str(mirror), str(staging / "ubuntu")])
+    _write_stamp(staging, after)
+    snapshot = out / snapshot_name
+    os.rename(staging, snapshot)
+    swap_current(out, snapshot)
+    gc_snapshots(out, max(1, retention))
+    logger.info("Published archive snapshot %s in %s.", snapshot.name, out)
+    return 0
+
+
+def main(argv=None) -> int:
+    """Entry point."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = parse_args(argv)
+    return sync_and_publish(
+        out=args.out,
+        archive_rsync_source=args.archive_rsync_source,
+        retention=args.retention,
+        force=args.force,
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

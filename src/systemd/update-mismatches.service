@@ -1,0 +1,22 @@
+[Unit]
+Description=Ubuntu Static Reports - Archive Mismatches reports
+# launchpad creds are actually not needed
+# upstream fix: https://code.launchpad.net/~jj/ubuntu-archive-tools/+git/ubuntu-archive-tools/+merge/508627
+ConditionFileNotEmpty=/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/staticreports/mismatches.env
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+WorkingDirectory=/usr/local/src/ubuntu-archive-tools
+ExecStart=update-mismatches

@@ -5,6 +5,7 @@
 
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 from subprocess import PIPE, STDOUT, CalledProcessError, SubprocessError, run
@@ -17,12 +18,18 @@ from charmlibs.apt import PackageError, PackageNotFoundError
 logger = logging.getLogger(__name__)
 
 PACKAGES = [
+    "distro-info",
+    "germinate",
     "git",
+    "graphviz",
     "nginx-light",
     "procmail",
+    "python3-apt",
     "python3-keyring",
     "python3-launchpadlib",
     "python3-yaml",
+    "rsync",
+    "unattended-upgrades",
 ]
 
 SRV_DIRS = [
@@ -32,6 +39,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/archive-permissions"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/bugpatterns"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/pending-sru"), "ubuntu", "ubuntu"),
+    (Path("/srv/staticreports/www/mismatches"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 
@@ -45,6 +53,8 @@ REPO_URLS = [
 
 NGINX_SITE_CONFIG_PATH = Path("/etc/nginx/conf.d/staticreports.conf")
 
+UNATTENDED_UPGRADES_CONFIG_PATH = Path("/etc/apt/apt.conf.d/50unattended-upgrades")
+
 UBUNTU_STATIC_REPORT_SERVICES = [
     "update-bugpatterns",
     "update-sync-blocklist",
@@ -53,9 +63,31 @@ UBUNTU_STATIC_REPORT_SERVICES = [
     "package-subscribers",
     "permissions-report",
     "sru-report",
+    "update-archive-mirror",
+    "update-germinate",
+    "update-mismatches",
 ]
 
 LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
+
+ARCHIVE_MIRROR_ENV_PATH = "/etc/staticreports/archive-mirror.env"
+MISMATCHES_ENV_PATH = "/etc/staticreports/mismatches.env"
+
+# germinate's real (hardlink-friendly) storage lives under mirror_dir, next to
+# the archive snapshots; this is the stable web path symlinked to its `current`.
+GERMINATE_WEB_PATH = Path("/srv/staticreports/www/germinate")
+DEFAULT_MIRROR_DIR = "/var/cache/mirror/ubuntu"
+
+
+def _relink(link: Path, target: str) -> None:
+    """Point `link` at `target`, replacing any existing file/dir/symlink."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or link.exists():
+        if link.is_dir() and not link.is_symlink():
+            shutil.rmtree(link)
+        else:
+            link.unlink()
+    link.symlink_to(target)
 
 
 class StaticReports:
@@ -102,12 +134,52 @@ class StaticReports:
                 logger.error("Failed to install %s: %s", package, e)
                 raise
 
+    def _configure_unattended_upgrades(self):
+        """Enable unattended-upgrades, extended to the -updates pocket (not just security)."""
+        try:
+            run(
+                ["debconf-set-selections"],
+                input="unattended-upgrades unattended-upgrades/enable_auto_updates boolean true\n",
+                check=True,
+                text=True,
+            )
+            run(
+                ["dpkg-reconfigure", "-f", "noninteractive", "unattended-upgrades"],
+                check=True,
+                stdout=PIPE,
+                stderr=STDOUT,
+                text=True,
+            )
+            logger.debug("unattended-upgrades enabled via dpkg-reconfigure")
+        except (CalledProcessError, SubprocessError) as e:
+            logger.error("Failed to enable unattended-upgrades: %s", e)
+            raise
+
+        try:
+            config = UNATTENDED_UPGRADES_CONFIG_PATH.read_text()
+            # enable updates pocket to get new distro-info and germinate versions.
+            updated = re.sub(
+                r'^//(?=\s*"\$\{distro_id\}:\$\{distro_codename\}-updates";)',
+                "  ",
+                config,
+                flags=re.MULTILINE,
+            )
+            if updated != config:
+                UNATTENDED_UPGRADES_CONFIG_PATH.write_text(updated)
+                logger.debug("Enabled -updates pocket in %s", UNATTENDED_UPGRADES_CONFIG_PATH)
+        except OSError as e:
+            logger.error("Failed to update %s: %s", UNATTENDED_UPGRADES_CONFIG_PATH, e)
+            raise
+
     def install(self):
         """Set up the environment required for the static reports."""
         logger.info("Install required deb packages")
         self._install_packages()
 
-        logger.info("Install 1/4 Create the required directories")
+        logger.info("Install 1/5 Configuring automatic security and stable updates")
+        self._configure_unattended_upgrades()
+
+        logger.info("Install 2/5 Create the required directories")
         for dir_path, dir_user, dir_group in SRV_DIRS:
             try:
                 os.makedirs(dir_path, exist_ok=True)
@@ -119,7 +191,7 @@ class StaticReports:
                 logger.warning("Creating directory %s failed: %s", dir_path, e)
                 raise
 
-        logger.info("Install 2/4 Updating repositories")
+        logger.info("Install 3/5 Updating repositories")
         for repo_url, repo_branch, repo_target in REPO_URLS:
             logger.debug("Handle repository %s", repo_url)
             try:
@@ -159,22 +231,26 @@ class StaticReports:
                         timeout=300,
                     )
             except (CalledProcessError, SubprocessError, FileNotFoundError) as e:
-                logger.warning("Git handling %s failed: %s", repo_url, e.stdout)
+                logger.warning("Git handling %s failed: %s", repo_url, e)
                 raise
 
-        logger.info("Install 3/4 Installing App and Config files")
+        logger.info("Install 4/5 Installing App and Config files")
         try:
             shutil.copy("src/script/update-bugpatterns", "/usr/bin")
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
             shutil.copy("src/script/sru-report", "/usr/bin")
+            shutil.copy("src/script/update-archive-mirror", "/usr/bin")
+            shutil.copy("src/script/germinate-ubuntu", "/usr/bin")
+            shutil.copy("src/script/update-germinate", "/usr/bin")
+            shutil.copy("src/script/update-mismatches", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:
             logger.warning("Error copying files: %s", str(e))
             raise
 
-        logger.info("Install 4/4 Removing default Nginx configuration")
+        logger.info("Install 5/5 Removing default Nginx configuration")
         Path("/etc/nginx/sites-enabled/default").unlink(missing_ok=True)
 
     def start(self):
@@ -234,6 +310,58 @@ class StaticReports:
         )
         return key_success
 
+    def configure_archive_mirror(self, archive_rsync_source: str, mirror_dir: str):
+        """Write the archive-mirror environment overrides from charm config.
+
+        The update-archive-mirror systemd unit reads these via EnvironmentFile, so
+        updates take effect on the next run without rewriting the unit file.
+        Empty values are omitted so the script falls back to its own defaults.
+
+        Also (re)points the germinate web path at <mirror_dir>/germinate/current,
+        so nginx serves germinate's real (hardlink-friendly) storage under
+        mirror_dir without moving it into the web root itself.
+        """
+        overrides = {
+            "RSYNC_ARCHIVE_SOURCE": archive_rsync_source,
+            "MIRROR_DIR": mirror_dir,
+        }
+        content = "".join(f"{k}={v}\n" for k, v in overrides.items() if v)
+        env_file = Path(ARCHIVE_MIRROR_ENV_PATH)
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(content, encoding="utf-8")
+        logger.debug(
+            "configure_archive_mirror: wrote archive-mirror configuration to %s", env_file
+        )
+
+        # update-archive-mirror.service runs as User=ubuntu, so the mirror root
+        # must exist and be owned by ubuntu before that unit can mkdir under it.
+        mirror_root = mirror_dir or DEFAULT_MIRROR_DIR
+        try:
+            os.makedirs(mirror_root, exist_ok=True)
+            shutil.chown(mirror_root, "ubuntu", "ubuntu")
+        except OSError as e:
+            logger.warning("Creating mirror directory %s failed: %s", mirror_root, e)
+            raise
+
+        germinate_current = f"{mirror_root}/germinate/current"
+        _relink(GERMINATE_WEB_PATH, germinate_current)
+        logger.debug(
+            "configure_archive_mirror: relinked %s to %s", GERMINATE_WEB_PATH, germinate_current
+        )
+
+    def configure_mismatches(self, mirror_dir: str):
+        """Write the mismatches environment overrides derived from charm config.
+
+        Writes ARCHIVE_ROOT so update-mismatches finds the combined
+        archive+germinate snapshot published by update-germinate. Empty
+        mirror_dir is omitted so the script falls back to its own default.
+        """
+        content = f"ARCHIVE_ROOT={mirror_dir}/germinate/current\n" if mirror_dir else ""
+        env_file = Path(MISMATCHES_ENV_PATH)
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(content, encoding="utf-8")
+        logger.debug("configure_mismatches: wrote mismatches configuration to %s", env_file)
+
     def refresh_report(self):
         """Refresh all the reports - wait for completion."""
         try:
@@ -243,17 +371,24 @@ class StaticReports:
             logger.debug("Refreshing of the tracker failed: %s", e.stdout)
             raise
 
-    def setup_systemd_unit(self, service):
+    def setup_systemd_unit(self, service):  # noqa: C901
         """Set up the requested service and timer with proxy configuration."""
         logger.debug("Setting up systemd unit for %s", service)
         systemd_unit_location = Path("/etc/systemd/system")
         systemd_unit_location.mkdir(parents=True, exist_ok=True)
 
+        # A unit already on disk means a previous install/upgrade managed it, so it
+        # may have been manually disabled since; a missing unit means it's new.
+        already_present = (systemd_unit_location / f"{service}.service").exists()
+
         systemd_service = Path(f"src/systemd/{service}.service")
         service_content = systemd_service.read_text(encoding="utf-8")
 
         systemd_timer = Path(f"src/systemd/{service}.timer")
-        timer_content = systemd_timer.read_text(encoding="utf-8")
+        if systemd_timer.exists():
+            timer_content = systemd_timer.read_text(encoding="utf-8")
+        else:
+            timer_content = None
 
         proxy_env_vars = ""
         if "http" in self.proxies:
@@ -271,16 +406,46 @@ class StaticReports:
         (systemd_unit_location / f"{service}.service").write_text(
             service_content, encoding="utf-8"
         )
-        (systemd_unit_location / f"{service}.timer").write_text(timer_content, encoding="utf-8")
+        if timer_content is not None:
+            (systemd_unit_location / f"{service}.timer").write_text(
+                timer_content, encoding="utf-8"
+            )
         logger.debug("Systemd units for %s written to %s", service, systemd_unit_location)
 
-        logger.debug("Enabling and starting %s.timer", service)
-        try:
-            systemd.service_enable("--now", f"{service}.timer")
-        except CalledProcessError as e:
-            logger.error("Failed to enable %s.timer: %s", service, e)
-            raise
+        unit_name = f"{service}.timer" if timer_content is not None else f"{service}.service"
+        if already_present and self._unit_is_disabled(unit_name):
+            logger.debug("%s was manually disabled; leaving it disabled", unit_name)
+            return
+
+        if timer_content is not None:
+            logger.debug("Enabling and starting %s.timer", service)
+            try:
+                systemd.service_enable("--now", f"{service}.timer")
+            except CalledProcessError as e:
+                logger.error("Failed to enable %s.timer: %s", service, e)
+                raise
+        else:
+            logger.debug("Enabling %s.service (no timer; triggered via OnSuccess)", service)
+            try:
+                systemd.service_enable(f"{service}.service")
+            except CalledProcessError as e:
+                logger.error("Failed to enable %s.service: %s", service, e)
+                raise
         logger.debug("Systemd unit %s enabled and started", service)
+
+    def _unit_is_disabled(self, unit_name: str) -> bool:
+        """Return True if `unit_name` is currently disabled per `systemctl is-enabled`.
+
+        Used only to decide whether a manually-disabled unit should be left
+        alone across installs/upgrades; any other status (enabled, static,
+        not-found, etc.) is treated as "not disabled" so it gets (re-)enabled.
+        """
+        try:
+            result = run(["systemctl", "is-enabled", unit_name], capture_output=True, text=True)
+        except OSError as e:
+            logger.warning("Failed to query enabled state of %s: %s", unit_name, e)
+            return False
+        return result.stdout.strip() == "disabled"
 
     def setup_systemd_units(self):
         """Set up all needed systemd services and timers."""

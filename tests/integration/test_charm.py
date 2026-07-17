@@ -16,6 +16,11 @@ requires_secret = pytest.mark.skipif(
     reason="LPUSER_OAUTH_FILE not set - secret-dependent tests skipped",
 )
 
+requires_archive = pytest.mark.skipif(
+    os.environ.get("MISMATCH_ARCHIVE_RSYNC_SOURCE") is None,
+    reason="MISMATCH_ARCHIVE_RSYNC_SOURCE not set - archive-dependent mismatch test skipped",
+)
+
 
 def deploy_wait_func(status):
     """Wait on juju status until deployed and started."""
@@ -156,4 +161,92 @@ def test_content_packageset_report(juju: jubilant.Juju):
         path="output/packageset-report.html",
         startswith="<!DOCTYPE html>",
         contains="Packageset Report",
+    )
+
+
+def test_all_timers_are_active(juju: jubilant.Juju):
+    """All report-service timers are installed and active after deploy."""
+    timers = [
+        "update-bugpatterns",
+        "update-sync-blocklist",
+        "update-seeds",
+        "packageset-report",
+        "package-subscribers",
+        "permissions-report",
+        "sru-report",
+        "update-archive-mirror",
+    ]
+    for timer in timers:
+        state = juju.ssh("ubuntu-static-reports/0", f"systemctl is-active {timer}.timer").strip()
+        assert state == "active", f"{timer}.timer is not active"
+
+
+def test_oncomplete_services_are_enabled(juju: jubilant.Juju):
+    """Services triggered via OnSuccess= are installed and enabled after deploy."""
+    services = ["update-germinate", "update-mismatches"]
+    for service in services:
+        state = juju.ssh(
+            "ubuntu-static-reports/0", f"systemctl is-enabled {service}.service"
+        ).strip()
+        assert state == "enabled", f"{service}.service is not enabled"
+
+
+def test_mismatches_path_is_served(juju: jubilant.Juju):
+    """The (initially empty) mismatches report directory is served by nginx."""
+    response = requests.get(f"http://{address(juju)}:80/mismatches/", timeout=30)
+    assert response.status_code == 200
+
+
+@requires_secret
+@requires_archive
+def test_content_mismatches(juju: jubilant.Juju):
+    """Generate and serve the mismatch reports against a reachable archive source.
+
+    Skipped unless MISMATCH_ARCHIVE_RSYNC_SOURCE points at an rsync source the
+    test runner can reach (the production default is the public archive
+    mirror, which may not be reachable from all CI runners). update-archive-mirror
+    builds the archive-index snapshot, update-germinate germinates it and
+    publishes the combined snapshot, and the mismatch reports then consume its
+    `current` pointer.
+    """
+    juju.config(
+        APPNAME,
+        {"rsync_archive_source": os.environ["MISMATCH_ARCHIVE_RSYNC_SOURCE"]},
+    )
+    juju.wait(jubilant.all_active, timeout=300)
+
+    # Seed the germinate inputs, then build the archive-index snapshot.
+    juju.ssh(
+        "ubuntu-static-reports/0",
+        "sudo systemctl start --no-block update-seeds.service",
+    )
+    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-seeds.service")
+
+    juju.ssh(
+        "ubuntu-static-reports/0",
+        "sudo systemctl start --no-block update-archive-mirror.service",
+    )
+    wait_oneshot_finished(
+        juju, unit="ubuntu-static-reports/0", service="update-archive-mirror.service"
+    )
+
+    # update-archive-mirror triggers update-germinate via OnSuccess=; wait for it
+    # to publish the combined archive+germinate snapshot the mismatch reports read.
+    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-germinate.service")
+
+    # update-germinate triggers update-mismatches via OnSuccess= in turn.
+    wait_oneshot_finished(
+        juju, unit="ubuntu-static-reports/0", service="update-mismatches.service"
+    )
+
+    # /germinate/ is a symlink the charm maintains to update-germinate's `current`
+    # snapshot, so it only resolves once a snapshot has actually been published.
+    response = requests.get(f"http://{address(juju)}:80/germinate/", timeout=30)
+    assert response.status_code == 200
+
+    check_content(
+        juju,
+        path="mismatches/architecture-mismatches.html",
+        startswith="<!DOCTYPE html",
+        contains="Architecture mismatches",
     )

@@ -18,7 +18,8 @@ from various sources depending on the respective service.
   * Execution time: <30 seconds
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-sync-blocklist
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist/tree/sync-blocklist.txt
-  * Presented: at https://ubuntu-archive-team.ubuntu.com/sync-blocklist.txt
+  * Old location: https://ubuntu-archive-team.ubuntu.com/sync-blocklist.txt
+  * New location: https://static-reports.ubuntu.com/sync-blocklist.txt
 
 * update-seeds
   * TL;DR: conversion of git branches about the seeds into directories, avoids pressure on the git servers
@@ -26,7 +27,8 @@ from various sources depending on the respective service.
   * Execution time: ~13 minutes initially, 1 minute on updates
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
   * Data: Maintained in git at `https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}`
-  * Presented at https://ubuntu-archive-team.ubuntu.com/seeds/
+  * Old location: https://ubuntu-archive-team.ubuntu.com/seeds/
+  * New location: https://static-reports.ubuntu.com/seeds/
 
 * package-subscribers
   * TL;DR: convert LP API information about package subscribers to json for faster consumption by other tools
@@ -34,7 +36,8 @@ from various sources depending on the respective service.
   * Execution time: ~3 min
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/package-subscribers
   * Data: Structural subscriptions in Launchpad of registered teams to source packages
-  * Presented at: https://ubuntu-archive-team.ubuntu.com/package-team-mapping.json
+  * Old location: https://ubuntu-archive-team.ubuntu.com/package-team-mapping.json
+  * New location: https://static-reports.ubuntu.com/package-team-mapping.json
 
 * permissions-report
   * TL;DR: Convert LP API data into a report about package upload ACLs
@@ -42,7 +45,8 @@ from various sources depending on the respective service.
   * Execution time: ~30 minutes
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Per Package ACLs stored in Launchpad
-  * Presented at https://ubuntu-archive-team.ubuntu.com/archive-permissions/
+  * Old location: https://ubuntu-archive-team.ubuntu.com/archive-permissions/
+  * New location: https://static-reports.ubuntu.com/archive-permissions/
 
 * packageset-report
   * TL;DR: Convert LP API data into a report about package sets as used for upload permissions
@@ -50,7 +54,8 @@ from various sources depending on the respective service.
   * Execution time: ~30 minutes
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Package Set information stored in Launchpad
-  * Presented at https://ubuntu-archive-team.ubuntu.com/packagesets/
+  * Old location: https://ubuntu-archive-team.ubuntu.com/packagesets/
+  * New location: https://static-reports.ubuntu.com/packagesets/
 
 * update-bugpatterns
   * TL;DR: git checkout and serve as XML avoiding pressure on the cgit frontend
@@ -58,7 +63,8 @@ from various sources depending on the respective service.
   * Execution time: <30 seconds
   * Code: included in this charm
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-bugcontrol/apport/+git/ubuntu-bugpatterns
-  * Presented at https://ubuntu-archive-team.ubuntu.com/bugpatterns/bugpatterns.xml
+  * Old location: https://ubuntu-archive-team.ubuntu.com/bugpatterns/bugpatterns.xml
+  * New location: https://static-reports.ubuntu.com/bugpatterns/bugpatterns.xml
 
 * sru-report
   * TL;DR: generate the Pending Ubuntu SRU report
@@ -66,7 +72,34 @@ from various sources depending on the respective service.
   * Execution time: up to several hours (8h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/sru-report
   * Data: Pending SRUs in the `-proposed` pockets for all stable releases of Ubuntu
-  * Previously presented at https://ubuntu-archive-team.ubuntu.com/pending-sru.html
+  * Old location: https://ubuntu-archive-team.ubuntu.com/pending-sru.html
+  * New location: https://static-reports.ubuntu.com/pending-sru/pending-sru.html
+
+* update-archive-mirror
+  * TL;DR: Build and atomically publish one consistent archive-index snapshot that other services (update-germinate, NBS) share as a single source of truth
+  * Timing: every 30 minutes, but a new snapshot is only built and swapped in when the archive indices actually changed
+  * Execution time: seconds when nothing changed; under a minute for a full rsync
+  * Code: `update-archive-mirror`
+  * Data: A local rsync mirror of the archive indices (the `dists` tree) from the archive (configurable via `rsync_archive_source`)
+  * Re-used internally by update-germinate (and potentially NBS); not exposed directly via nginx
+
+* update-germinate
+  * TL;DR: Germinate the current archive-mirror snapshot against the published seeds, publishing the combined archive+germinate result for other services to consume
+  * Timing: after the archive mirror was updated
+  * Execution time: a few minutes when the snapshot changed, seconds otherwise
+  * Code: wrapper `update-germinate` is included in this charm; the germinate tool itself comes from https://git.launchpad.net/ubuntu-archive-tools
+  * Data: Current archive indices (from update-archive-mirror) and seeds (from update-seeds)
+  * Old location: https://ubuntu-archive-team.ubuntu.com/germinate-output/
+  * New location: https://static-reports.ubuntu.com/germinate/
+
+* update-mismatches
+  * TL;DR: Generate the archive override mismatch reports (architecture, component, pocket, priority)
+  * Timing: after germinate completed
+  * Execution time: a few minutes when the snapshot changed, seconds otherwise
+  * Code: wrapper `update-mismatches` is included in this charm; the mismatch reports themselves come from https://git.launchpad.net/ubuntu-archive-tools
+  * Data: Current germinate snapshot (which already includes the archive indices)
+  * Old location: https://ubuntu-archive-team.ubuntu.com/ \*-mismatches.\*
+  * New location: https://static-reports.ubuntu.com/mismatches/
 
 ## Basic usage
 
@@ -108,48 +141,19 @@ next, the log output of each and more - use systemctl as the are all systemd
 timers and services.
 
 ```bash
-❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report
-NEXT                            LEFT LAST                              PASSED UNIT                        ACTIVATES                    
-Mon 2026-04-13 11:44:21 UTC 3min 18s Mon 2026-04-13 11:39:10 UTC 1min 53s ago update-sync-blocklist.timer update-sync-blocklist.service
-Mon 2026-04-13 11:45:01 UTC 3min 58s Mon 2026-04-13 11:39:25 UTC 1min 37s ago update-bugpatterns.timer    update-bugpatterns.service
-Mon 2026-04-13 11:47:12 UTC     6min Mon 2026-04-13 11:31:25 UTC     9min ago update-seeds.timer          update-seeds.service
-Mon 2026-04-13 11:47:44 UTC     6min Mon 2026-04-13 11:15:25 UTC    25min ago package-subscribers.timer   package-subscribers.service
-Mon 2026-04-13 17:15:54 UTC 5h 34min Mon 2026-04-13 11:15:25 UTC    25min ago packageset-report.timer     packageset-report.service
-Mon 2026-04-13 17:17:36 UTC 5h 36min Mon 2026-04-13 11:15:25 UTC    25min ago permissions-report.timer    permissions-report.service
+❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report update-mismatches update-germinate update-archive-mirror
 ```
 
 Since the report execution is wrapped into systemd services, one can also use
-`systemctl status` as well as `journalctl -u` to assess state and debug if
+`systemctl status` as well as `journalctl -eu` to assess state and debug if
 neccessary.
 
 ```bash
-❯ journalctl -u update-sync-blocklist
-Dec 16 14:52:12 juju-c5cbb1-23 systemd[1]: Starting update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view...
-Dec 16 14:52:12 juju-c5cbb1-23 update-sync-blocklist[6405]: Status: Initial clone
-Dec 16 14:52:12 juju-c5cbb1-23 update-sync-blocklist[6423]: Cloning into '/home/ubuntu/sync-blocklist'...
-Dec 16 14:52:13 juju-c5cbb1-23 update-sync-blocklist[6405]: Status: atomic exchange
-Dec 16 14:52:13 juju-c5cbb1-23 systemd[1]: update-sync-blocklist.service: Deactivated successfully.
-Dec 16 14:52:13 juju-c5cbb1-23 systemd[1]: Finished update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view.
-Dec 16 14:52:43 juju-c5cbb1-23 systemd[1]: Starting update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view...
-Dec 16 14:52:43 juju-c5cbb1-23 update-sync-blocklist[6569]: Status: In-place update from git
-Dec 16 14:52:45 juju-c5cbb1-23 update-sync-blocklist[6569]: Status: atomic exchange
-Dec 16 14:52:45 juju-c5cbb1-23 systemd[1]: update-sync-blocklist.service: Deactivated successfully.
+❯ journalctl -eu update-sync-blocklist
+```
 
-
+```bash
 ❯ systemctl status update-sync-blocklist.service
-○ update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view
-     Loaded: loaded (/etc/systemd/system/update-sync-blocklist.service; static)
-     Active: inactive (dead) since Tue 2025-12-16 14:57:57 UTC; 3min 45s ago
-TriggeredBy: ● update-sync-blocklist.timer
-    Process: 7536 ExecStart=update-sync-blocklist (code=exited, status=0/SUCCESS)
-   Main PID: 7536 (code=exited, status=0/SUCCESS)
-        CPU: 70ms
-
-Dec 16 14:57:56 juju-c5cbb1-23 systemd[1]: Starting update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view...
-Dec 16 14:57:56 juju-c5cbb1-23 update-sync-blocklist[7536]: Status: In-place update from git
-Dec 16 14:57:57 juju-c5cbb1-23 update-sync-blocklist[7536]: Status: atomic exchange
-Dec 16 14:57:57 juju-c5cbb1-23 systemd[1]: update-sync-blocklist.service: Deactivated successfully.
-Dec 16 14:57:57 juju-c5cbb1-23 systemd[1]: Finished update-sync-blocklist.service - Ubuntu Static Reports - Sync Blocklist Web view.
 ```
 
 ## Testing

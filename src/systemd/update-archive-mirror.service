@@ -1,0 +1,19 @@
+[Unit]
+Description=Ubuntu Static Reports - archive mirror sync
+OnSuccess=update-germinate.service
+
+[Service]
+Type=oneshot
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+EnvironmentFile=-/etc/staticreports/archive-mirror.env
+ExecStart=/usr/bin/update-archive-mirror

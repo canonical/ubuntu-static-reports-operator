@@ -14,10 +14,6 @@ coverage==7.15.1
     # via ubuntu-static-reports-operator (pyproject.toml)
 idna==3.18
     # via requests
-importlib-metadata==9.0.0
-    # via
-    #   opentelemetry-api
-    #   ops
 iniconfig==2.3.0
     # via pytest
 jubilant==1.11.0
@@ -39,7 +35,7 @@ pluggy==1.6.0
     # via pytest
 pydantic==2.13.4
     # via ubuntu-static-reports-operator (pyproject.toml)
-pydantic-core==2.47.0
+pydantic-core==2.46.4
     # via pydantic
 pygments==2.20.0
     # via pytest
@@ -54,9 +50,12 @@ requests==2.34.2
     # via ubuntu-static-reports-operator (pyproject.toml)
 ruff==0.15.21
     # via ubuntu-static-reports-operator (pyproject.toml)
+ty==0.0.54
+    # via ubuntu-static-reports-operator (pyproject.toml)
 typing-extensions==4.16.0
     # via
     #   opentelemetry-api
+    #   ops-scenario
     #   pydantic
     #   pydantic-core
     #   typing-inspection
@@ -68,5 +67,3 @@ urllib3==2.7.0
     #   requests
 websocket-client==1.9.0
     # via ops
-zipp==4.1.0
-    # via importlib-metadata

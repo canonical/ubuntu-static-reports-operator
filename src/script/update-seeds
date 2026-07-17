@@ -1,89 +1,175 @@
-#! /bin/bash
-# Evolved from
-# https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
-# To be less dependent on a prepared local setup or path
-set -e
+#!/usr/bin/env python3
+"""Keep local clones of the Ubuntu flavour seed repositories up to date.
 
-workdir=${WORKDIR:-"~/public_html/seeds"}
-cd "$workdir"
+Mirrors the ubuntu-seeds git repository branch for each (flavour, series)
+germinate needs into <workdir>/<flavour>.<series>/, skipping series a
+flavour didn't exist in and series that are no longer active (supported,
+ESM, or in development) instead of relying on a hardcoded series list that
+needs updating every release.
 
-ONLY_SERIES="$1"
+Options can be overridden on the command line or via environment variables
+(the systemd unit sets WORKDIR; see update-seeds.service).
+"""
 
-# Retry helper: run a command string with exponential backoff
-# used to tolerate transient infra failures.
-# Optional external configuration with environment variables:
-#   MAX_ATTEMPTS (default 5)
-#   INITIAL_DELAY (seconds, default 2)
-# Using eval to allow complex commands with pipes/redirection.
-retry_cmd() {
-    local cmd="$1"
-    local max_attempts=${MAX_ATTEMPTS:-5}
-    local attempt=1
-    local delay=${INITIAL_DELAY:-3}
+import argparse
+import logging
+import os
+import shlex
+import subprocess
+import time
+from pathlib import Path
 
-    while true; do
-        if eval "$cmd"; then
-            return 0
-        fi
-        if [ "$attempt" -ge "$max_attempts" ]; then
-            echo "ERROR: command failed after $attempt attempts: $cmd" >&2
-            return 1
-        fi
-        echo "Warning: command failed (attempt $attempt/$max_attempts). Retrying in $delay seconds..." >&2
-        sleep "$delay"
-        attempt=$((attempt + 1))
-        delay=$((delay * 2))
-    done
-}
+from distro_info import UbuntuDistroInfo
 
-for dist in platform.{jammy,noble,plucky,questing,resolute} \
-            ubuntu.{jammy,noble,plucky,questing,resolute} \
-            kubuntu.{jammy,noble,plucky,questing,resolute} \
-            edubuntu.{noble,plucky,questing,resolute} \
-            xubuntu.{jammy,noble,plucky,questing,resolute} \
-            i386.{jammy,noble,plucky,questing,resolute} \
-            ubuntustudio.{jammy,noble,plucky,questing,resolute} \
-            lubuntu.{jammy,noble,plucky,questing,resolute} \
-            ubuntukylin.{jammy,noble,plucky,questing,resolute} \
-            ubuntucinnamon.{noble,plucky,questing,resolute} \
-            ubuntu-core.{jammy,noble,plucky,questing,resolute} \
-            ubuntu-mate.{jammy,noble,plucky,questing,resolute} \
-            ubuntu-budgie.{jammy,noble,plucky,questing,resolute} \
-            ubuntu-unity.{noble,plucky,questing,resolute}; do
-    if [ "$ONLY_SERIES" ]; then
-        case $dist in
-            *.$ONLY_SERIES)
-                ;;
-            *)
+logger = logging.getLogger("update-seeds")
+
+
+def flavor_maintainers() -> dict[str, tuple[str, str]]:
+    """Get a list of current flavors, the owning team and the earliest series it has seeds."""
+    # flavour -> (Launchpad team, earliest series)
+    return {
+        "platform": ("ubuntu-core-dev", "jammy"),
+        "ubuntu": ("ubuntu-core-dev", "jammy"),
+        "kubuntu": ("kubuntu-dev", "jammy"),
+        "edubuntu": ("edubuntu-dev", "noble"),
+        "xubuntu": ("xubuntu-dev", "jammy"),
+        "i386": ("ubuntu-core-dev", "jammy"),
+        "ubuntustudio": ("ubuntustudio-dev", "jammy"),
+        "lubuntu": ("lubuntu-dev", "jammy"),
+        "ubuntukylin": ("ubuntukylin-members", "jammy"),
+        "ubuntucinnamon": ("ubuntucinnamon-dev", "noble"),
+        "ubuntu-core": ("ubuntu-core-dev", "jammy"),
+        "ubuntu-mate": ("ubuntu-mate-dev", "jammy"),
+        "ubuntu-budgie": ("ubuntubudgie-dev", "jammy"),
+        "ubuntu-unity": ("unity7maintainers", "noble"),
+    }
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line options."""
+    parser = argparse.ArgumentParser(
+        description="Clone/update the ubuntu-seeds branches germinate needs."
+    )
+    parser.add_argument(
+        "update_series",
+        nargs="?",
+        help="Only update this series (default: every active series).",
+    )
+    parser.add_argument(
+        "--workdir",
+        type=Path,
+        default=Path(os.environ.get("WORKDIR", "~/public_html/seeds")).expanduser(),
+        help="Directory holding the flavour.series seed checkouts.",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=int(os.environ.get("MAX_ATTEMPTS", "5")),
+        help="Git retry attempts before giving up on a checkout.",
+    )
+    parser.add_argument(
+        "--initial-delay",
+        type=float,
+        default=float(os.environ.get("INITIAL_DELAY", "10")),
+        help="Initial retry backoff in seconds (doubles each attempt).",
+    )
+    return parser.parse_args(argv)
+
+
+def _active_series() -> list[str]:
+    """Series considered active: currently supported, ESM, or in development."""
+    info = UbuntuDistroInfo()
+    active = set(info.supported()) | set(info.supported_esm())
+    try:
+        active.add(info.devel())
+    except Exception:
+        pass
+    return [s for s in info.all if s in active]
+
+
+def _series_from(since: str, series: list[str]) -> list[str]:
+    """Entries of `series` no older than `since`, per Ubuntu release order."""
+    order = UbuntuDistroInfo().all
+    start = order.index(since)
+    return [s for s in series if order.index(s) >= start]
+
+
+def _run_with_retry(cmd: list[str], max_attempts: int, initial_delay: float) -> None:
+    """Run `cmd`, retrying with exponential backoff to tolerate transient failures."""
+    logger.info("Running: %s", shlex.join(cmd))
+    delay = initial_delay
+    for attempt in range(1, max_attempts + 1):
+        if subprocess.run(cmd).returncode == 0:
+            return
+        if attempt >= max_attempts:
+            raise RuntimeError(f"Failed after {max_attempts} attempts: {shlex.join(cmd)}")
+        logger.warning(
+            "Command failed (attempt %d/%d). Retrying in %.0fs...", attempt, max_attempts, delay
+        )
+        time.sleep(delay)
+        delay *= 2
+
+
+def update_seed_checkout(
+    flavour: str,
+    series: str,
+    team: str,
+    workdir: Path,
+    max_attempts: int,
+    initial_delay: float,
+) -> None:
+    """Clone the flavour's seed branch for `series`, or fast-forward it in place."""
+    dist_dir = workdir / f"{flavour}.{series}"
+    if dist_dir.is_dir():
+        _run_with_retry(
+            ["git", "-C", str(dist_dir), "fetch", "origin", "--quiet", "--force"],
+            max_attempts,
+            initial_delay,
+        )
+        _run_with_retry(
+            ["git", "-C", str(dist_dir), "reset", "--hard", f"origin/{series}"],
+            max_attempts,
+            initial_delay,
+        )
+    else:
+        repo = f"https://git.launchpad.net/~{team}/ubuntu-seeds/+git/{flavour}"
+        _run_with_retry(
+            ["git", "clone", "--quiet", "--branch", series, repo, str(dist_dir)],
+            max_attempts,
+            initial_delay,
+        )
+
+
+def update_seeds(
+    flavors: dict[str, tuple[str, str]],
+    workdir: Path,
+    max_attempts: int,
+    initial_delay: float,
+    update_series: str | None,
+) -> None:
+    """Walk over all given flavours to update their seeds for the selected series."""
+    active = _active_series()
+    for flavour, (team, since) in flavors.items():
+        for series in _series_from(since, active):
+            if update_series and series != update_series:
                 continue
-                ;;
-        esac
-    fi
+            update_seed_checkout(flavour, series, team, workdir, max_attempts, initial_delay)
 
-    case $dist in
-        edubuntu.*|kubuntu.*|xubuntu.*|ubuntustudio.*|lubuntu.*|\
-        ubuntu-gnome.*|ubuntu-mate.*|ubuntucinnamon.*)
-            team=${dist%.*}-dev
-            ;;
-        ubuntukylin.*)
-            team=ubuntukylin-members
-            ;;
-        ubuntu-budgie.*)
-            team=ubuntubudgie-dev
-            ;;
-        ubuntu-unity.*)
-            team=unity7maintainers
-            ;;
-        *)
-            team=ubuntu-core-dev
-            ;;
-    esac
-    series="${dist##*.}"
-    if [ -d "$dist" ]; then
-        retry_cmd "git -C $dist fetch origin --quiet --force" || exit 1
-        retry_cmd "git -C $dist reset --hard origin/$series" || exit 1
-    else
-        repo="https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}"
-        retry_cmd "git clone --quiet --branch $series $repo $dist" || exit 1
-    fi
-done
+
+def main(argv: list[str] | None = None) -> None:
+    """Entry point."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = parse_args(argv)
+    args.workdir.mkdir(parents=True, exist_ok=True)
+
+    update_seeds(
+        flavor_maintainers(),
+        args.workdir,
+        args.max_attempts,
+        args.initial_delay,
+        args.update_series,
+    )
+
+
+if __name__ == "__main__":
+    main()

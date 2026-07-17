@@ -1,0 +1,340 @@
+#!/usr/bin/python3
+"""Germinate Ubuntu seeds against a local archive snapshot.
+
+By default, germinates every series present in the local archive against the
+release pocket, then also germinates the development series against the full
+proposed-pocket ogre stack.  Pass --no-proposed to skip the second run.
+
+Output files use the ``<seed>_<flavour>_<series>_<arch>`` naming that
+component-mismatches and other archive-admin tools expect.
+
+Based on lib/lp/archivepublisher/scripts/generate_extra_overrides.py from
+Launchpad, which is:
+
+Copyright 2011-2012 Canonical Ltd.  This software is licensed under the
+GNU Affero General Public License version 3 (see the file LICENSE).
+"""
+
+import argparse
+import copy
+import glob
+import logging
+import os
+import pickle
+import shutil
+import subprocess
+import sys
+import traceback
+from pathlib import Path
+
+from germinate.archive import TagFile
+from germinate.germinator import Germinator
+from germinate.log import GerminateFormatter
+from germinate.seeds import SeedError, SeedStructure
+
+COMPONENTS = ["main", "restricted", "universe", "multiverse"]
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """CLI interface."""
+    parser = argparse.ArgumentParser(
+        description="Germinate Ubuntu seeds against a local archive snapshot."
+    )
+    parser.add_argument(
+        "--no-proposed",
+        action="store_true",
+        help="Skip germinating the proposed pocket for the development series.",
+    )
+    parser.add_argument(
+        "--proposed-output",
+        metavar="DIR",
+        help="Output directory for the proposed germination (default: 'germinate-proposed' sibling of -o).",
+    )
+    parser.add_argument(
+        "-s",
+        "--series",
+        metavar="SERIES",
+        help="Only germinate this series (default: all series in the archive).",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="germinate-release",
+        help="Output directory.",
+    )
+    parser.add_argument(
+        "--archiveroot",
+        default=f"file://{Path.home() / 'mirror' / 'ubuntu'}",
+        help="Distribution archive root URL.",
+    )
+    parser.add_argument(
+        "-S",
+        "--seed-source",
+        metavar="URL",
+        help="Seed base URL.",
+    )
+    parser.add_argument(
+        "flavours",
+        nargs="*",
+        default=["ubuntu"],
+        help="Flavours to germinate (default: ubuntu).",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = parse_args(argv)
+    seed_bases = [args.seed_source] if args.seed_source else None
+
+    germinate_logger = logging.getLogger("germinate")
+    germinate_logger.setLevel(logging.INFO)
+    germinate_logger.propagate = False
+
+    def germinate_to(output: str, suites: list[str]) -> None:
+        outdir_new = f"{output}.new"
+        if os.path.exists(outdir_new):
+            shutil.rmtree(outdir_new)
+        os.makedirs(outdir_new)
+        handler = logging.FileHandler(os.path.join(outdir_new, "germinate.output"), mode="w")
+        handler.setFormatter(GerminateFormatter())
+        germinate_logger.addHandler(handler)
+        try:
+            for suite in suites:
+                try:
+                    germinate_suite(
+                        suite, args.flavours, args.archiveroot, outdir_new, seed_bases, germinate_logger
+                    )
+                except Exception as e:
+                    logging.warning("Failed to germinate %s: %s", suite, e)
+        finally:
+            germinate_logger.removeHandler(handler)
+            handler.close()
+        old = f"{output}.old"
+        if os.path.exists(old):
+            shutil.rmtree(old)
+        if os.path.exists(output):
+            os.rename(output, old)
+        os.rename(outdir_new, output)
+        if os.path.exists(old):
+            shutil.rmtree(old)
+
+    series_list = [args.series] if args.series else _series_from_archive(args.archiveroot)
+    germinate_to(args.output, series_list)
+
+    if not args.no_proposed:
+        proposed_out = args.proposed_output or str(Path(args.output).parent / "germinate-proposed")
+        series = args.series or _devel_series()
+        germinate_to(proposed_out, [f"{series}-proposed"])
+
+    return 0
+
+
+class _BufferHandler(logging.Handler):
+    """Accumulate serialised log records for sequential replay in the parent."""
+
+    def __init__(self):
+        super().__init__()
+        self.records: list[bytes] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        record = copy.copy(record)
+        record.msg = record.getMessage()
+        record.args = None
+        self.records.append(pickle.dumps(record, -1))
+
+
+def _archs_from_release(archiveroot: str, series: str) -> list[str]:
+    """Parse the Architectures field from the series Release file."""
+    if not archiveroot.startswith("file://"):
+        raise RuntimeError("Architecture discovery requires a file:// archiveroot")
+    release = Path(archiveroot[len("file://") :]) / "dists" / series / "Release"
+    for line in release.read_text().splitlines():
+        if line.startswith("Architectures:"):
+            return line.split(":", 1)[1].split()
+    raise RuntimeError(f"No Architectures field in {release}")
+
+
+def _series_from_archive(archiveroot: str) -> list[str]:
+    """Return the top-level series present in the local archive mirror."""
+    if not archiveroot.startswith("file://"):
+        raise RuntimeError("Series discovery requires a file:// archiveroot")
+    dists = Path(archiveroot[len("file://") :]) / "dists"
+    return sorted(
+        p.name for p in dists.iterdir() if "-" not in p.name and (p / "Release").exists()
+    )
+
+
+def _devel_series() -> str:
+    return subprocess.run(
+        ["distro-info", "--devel"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _ogre_suites(suite: str) -> list[str]:
+    """Expand a suite to the ordered set of pockets for the ogre model."""
+    if "-" not in suite:
+        return [suite]
+    series, pocket = suite.split("-", 1)
+    suites = [series]
+    if pocket in ("updates", "security", "proposed"):
+        suites.append(f"{series}-security")
+    if pocket in ("updates", "proposed"):
+        suites.append(f"{series}-updates")
+    if pocket == "proposed":
+        suites.append(f"{series}-proposed")
+    return suites
+
+
+def _make_seed_structures(
+    suite: str, flavours: list[str], seed_bases: list[str] | None
+) -> dict[str, SeedStructure]:
+    series = suite.split("-")[0]
+    structures = {}
+    for flavour in flavours:
+        try:
+            structure = SeedStructure(f"{flavour}.{series}", seed_bases=seed_bases)
+            if len(structure):
+                structures[flavour] = structure
+            else:
+                logging.warning("Skipping empty seed structure for %s.%s", flavour, series)
+        except SeedError as e:
+            logging.warning("Failed to fetch seeds for %s.%s: %s", flavour, series, e)
+    return structures
+
+
+def _write_germinate_output(
+    germinator: Germinator,
+    structure: SeedStructure,
+    outdir: str,
+    flavour: str,
+    suite: str,
+    arch: str,
+    seed_outputs: set[str],
+) -> None:
+    series = suite.split("-")[0]
+
+    def path(base: str) -> str:
+        p = os.path.join(outdir, f"{base}_{flavour}_{series}_{arch}")
+        seed_outputs.add(os.path.basename(p))
+        return p
+
+    structure.write(path("structure"))
+    germinator.write_all_list(structure, path("all"))
+    germinator.write_all_source_list(structure, path("all.sources"))
+    for seedname in structure.names:
+        germinator.write_full_list(structure, path(seedname), seedname)
+
+
+def _germinate_arch(
+    suite: str,
+    components: list[str],
+    arch: str,
+    flavours: list[str],
+    structures: dict[str, SeedStructure],
+    archiveroot: str,
+    outdir: str,
+) -> set[str]:
+    """Germinate all flavours for one architecture. Runs in a forked child."""
+    glog = logging.getLogger("germinate")
+    germinator = Germinator(arch)
+    archive = TagFile(_ogre_suites(suite), components, arch, archiveroot, cleanup=True)
+    germinator.parse_archive(archive)
+
+    seed_outputs: set[str] = set()
+    for flavour in flavours:
+        logging.info("Germinating for %s/%s/%s", flavour, suite, arch)
+        glog.info("", extra={"progress": True})
+        glog.info("Germinating for %s/%s/%s", flavour, suite, arch, extra={"progress": True})
+
+        germinator.plant_seeds(structures[flavour])
+        germinator.grow(structures[flavour])
+        germinator.add_extras(structures[flavour])
+        _write_germinate_output(
+            germinator, structures[flavour], outdir, flavour, suite, arch, seed_outputs
+        )
+
+    return seed_outputs
+
+
+def _germinate_arch_child(close_fds: list[int], wfd: int, *args) -> int:
+    try:
+        for fd in close_fds:
+            os.close(fd)
+
+        # Replace the parent's file handler with an in-memory buffer so the
+        # child's log output is replayed sequentially in the parent.
+        glog = logging.getLogger("germinate")
+        glog.handlers.clear()
+        buf = _BufferHandler()
+        glog.addHandler(buf)
+
+        seed_outputs = _germinate_arch(*args)
+
+        with os.fdopen(wfd, "wb") as w:
+            pickle.dump((buf.records, seed_outputs), w, -1)
+        return 0
+    except Exception:
+        traceback.print_exc()
+        with os.fdopen(wfd, "wb") as w:
+            pickle.dump(([], set()), w, -1)
+        return 1
+
+
+def germinate_suite(
+    suite: str,
+    flavours: list[str],
+    archiveroot: str,
+    outdir: str,
+    seed_bases: list[str] | None,
+    germinate_logger: logging.Logger,
+) -> None:
+    """Germinate one suite, forking a child per architecture."""
+    structures = _make_seed_structures(suite, flavours, seed_bases)
+    if not structures:
+        return
+
+    series = suite.split("-")[0]
+    archs = _archs_from_release(archiveroot, series)
+
+    procs = []
+    close_fds: list[int] = []
+    for arch in archs:
+        rfd, wfd = os.pipe()
+        close_fds.append(rfd)
+        pid = os.fork()
+        if pid == 0:
+            os._exit(
+                _germinate_arch_child(
+                    close_fds,
+                    wfd,
+                    suite,
+                    COMPONENTS,
+                    arch,
+                    flavours,
+                    structures,
+                    archiveroot,
+                    outdir,
+                )
+            )
+        else:
+            os.close(wfd)
+            procs.append((pid, os.fdopen(rfd, "rb")))
+
+    seed_outputs: set[str] = set()
+    for pid, reader in procs:
+        log_records, arch_seed_outputs = pickle.load(reader)
+        for rec in log_records:
+            germinate_logger.handle(pickle.loads(rec))
+        seed_outputs |= arch_seed_outputs
+        reader.close()
+        os.waitpid(pid, 0)
+
+    for output in glob.glob(os.path.join(outdir, f"*_*_{series}_*")):
+        if os.path.basename(output) not in seed_outputs:
+            os.remove(output)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

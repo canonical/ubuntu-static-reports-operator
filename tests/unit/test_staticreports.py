@@ -9,6 +9,7 @@ pathlib writes) so they can run as unit tests without touching the host.
 
 from pathlib import Path
 from subprocess import CalledProcessError
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -46,8 +47,76 @@ def test_install_packages_raises_when_apt_update_fails(monkeypatch):
         sr._install_packages()
 
 
+UNATTENDED_UPGRADES_SAMPLE_CONFIG = """Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}";
+    "${distro_id}:${distro_codename}-security";
+    // only security is enabled by default
+    "${distro_id}ESMApps:${distro_codename}-apps-security";
+    "${distro_id}ESM:${distro_codename}-infra-security";
+//  "${distro_id}:${distro_codename}-updates";
+//  "${distro_id}:${distro_codename}-proposed";
+//  "${distro_id}:${distro_codename}-backports";
+};
+"""
+
+
+def test_configure_unattended_upgrades_enables_auto_updates_via_dpkg_reconfigure(monkeypatch):
+    run_calls = []
+
+    def fake_run(cmd, **kwargs):
+        run_calls.append(cmd)
+        return Mock()
+
+    monkeypatch.setattr(staticreports, "run", fake_run)
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self: UNATTENDED_UPGRADES_SAMPLE_CONFIG
+    )
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text: None)
+    sr = staticreports.StaticReports()
+
+    sr._configure_unattended_upgrades()
+
+    assert ["debconf-set-selections"] in run_calls
+    assert ["dpkg-reconfigure", "-f", "noninteractive", "unattended-upgrades"] in run_calls
+
+
+def test_configure_unattended_upgrades_enables_updates_pocket_in_allowed_origins(monkeypatch):
+    monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self: UNATTENDED_UPGRADES_SAMPLE_CONFIG
+    )
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path, "write_text", lambda self, text: written.__setitem__(str(self), text)
+    )
+    sr = staticreports.StaticReports()
+
+    sr._configure_unattended_upgrades()
+
+    content = written[str(staticreports.UNATTENDED_UPGRADES_CONFIG_PATH)]
+    assert '    "${distro_id}:${distro_codename}-updates";' in content
+    assert '//  "${distro_id}:${distro_codename}-proposed";' in content
+    assert '//  "${distro_id}:${distro_codename}-backports";' in content
+
+
+def test_configure_unattended_upgrades_raises_when_dpkg_reconfigure_fails(monkeypatch):
+    def bad_run(cmd, **kwargs):
+        if cmd[0] == "dpkg-reconfigure":
+            raise CalledProcessError(1, cmd)
+        return Mock()
+
+    monkeypatch.setattr(staticreports, "run", bad_run)
+    sr = staticreports.StaticReports()
+
+    with pytest.raises(CalledProcessError):
+        sr._configure_unattended_upgrades()
+
+
 def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
 
     run_mock = Mock()
     monkeypatch.setattr(staticreports, "run", run_mock)
@@ -82,6 +151,10 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     assert ("copy", "src/script/update-bugpatterns", "/usr/bin") in ops
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
+    assert ("copy", "src/script/update-archive-mirror", "/usr/bin") in ops
+    assert ("copy", "src/script/germinate-ubuntu", "/usr/bin") in ops
+    assert ("copy", "src/script/update-germinate", "/usr/bin") in ops
+    assert ("copy", "src/script/update-mismatches", "/usr/bin") in ops
     assert (
         "copy",
         "src/nginx/staticreports.conf",
@@ -93,6 +166,9 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
 
 def test_install_raises_when_script_copy_fails(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
@@ -301,6 +377,9 @@ def test_install_packages_raises_when_package_installation_fails(monkeypatch):
 
 def test_install_raises_when_directory_creation_fails(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)
     monkeypatch.setattr(
@@ -329,6 +408,79 @@ def test_configure_url_logs_configured_url(caplog):
     assert "The url in use is http://example.local:80" in caplog.text
 
 
+def test_configure_mismatches_writes_archive_root_from_mirror_dir(monkeypatch):
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
+    sr = staticreports.StaticReports()
+
+    sr.configure_mismatches("/srv/mirror")
+
+    content = written[staticreports.MISMATCHES_ENV_PATH]
+    assert content == "ARCHIVE_ROOT=/srv/mirror/germinate/current\n"
+
+
+def test_configure_archive_mirror_writes_overrides(monkeypatch):
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
+    relinked = {}
+    monkeypatch.setattr(
+        staticreports, "_relink", lambda link, target: relinked.__setitem__(str(link), target)
+    )
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda path, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    sr = staticreports.StaticReports()
+
+    sr.configure_archive_mirror("rsync://host/dists/", "/var/cache/mirror")
+
+    content = written[staticreports.ARCHIVE_MIRROR_ENV_PATH]
+    assert "RSYNC_ARCHIVE_SOURCE=rsync://host/dists/" in content
+    assert "MIRROR_DIR=/var/cache/mirror" in content
+    assert relinked[str(staticreports.GERMINATE_WEB_PATH)] == "/var/cache/mirror/germinate/current"
+
+
+def test_configure_archive_mirror_relinks_germinate_to_default_when_mirror_dir_empty(monkeypatch):
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text, encoding=None: None)
+    relinked = {}
+    monkeypatch.setattr(
+        staticreports, "_relink", lambda link, target: relinked.__setitem__(str(link), target)
+    )
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda path, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    sr = staticreports.StaticReports()
+
+    sr.configure_archive_mirror("", "")
+
+    assert (
+        relinked[str(staticreports.GERMINATE_WEB_PATH)]
+        == f"{staticreports.DEFAULT_MIRROR_DIR}/germinate/current"
+    )
+
+
+def test_update_germinate_is_a_registered_report_service():
+    assert "update-germinate" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
+
+
+def test_update_mismatches_is_a_registered_report_service():
+    assert "update-mismatches" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
+
+
 def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
     monkeypatch.setattr(staticreports.Path, "read_text", lambda self, encoding=None: "[Service]")
     monkeypatch.setattr(staticreports.Path, "write_text", lambda self, t, encoding=None: None)
@@ -346,6 +498,104 @@ def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
 
     with pytest.raises(CalledProcessError):
         sr.setup_systemd_unit("update-seeds")
+
+
+def test_setup_systemd_unit_skips_enabling_when_existing_unit_manually_disabled(monkeypatch):
+    """A unit already present on disk and disabled via systemctl should stay disabled."""
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self, encoding=None: "[Service]\n[Timer]"
+    )
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+
+    def fake_exists(self):
+        # Both the shipped timer definition and the already-installed unit exist.
+        return (
+            self.parent.name == "systemd"
+            or str(self) == "/etc/systemd/system/update-seeds.service"
+        )
+
+    monkeypatch.setattr(staticreports.Path, "exists", fake_exists)
+
+    enabled = []
+    monkeypatch.setattr(
+        staticreports.systemd, "service_enable", lambda *args, **kwargs: enabled.append(args)
+    )
+
+    fake_result = SimpleNamespace(stdout="disabled\n")
+    monkeypatch.setattr(staticreports, "run", lambda *args, **kwargs: fake_result)
+
+    sr = staticreports.StaticReports()
+    sr.setup_systemd_unit("update-seeds")
+
+    assert enabled == []
+    assert "/etc/systemd/system/update-seeds.service" in written
+
+
+def test_setup_systemd_unit_enables_existing_unit_when_still_enabled(monkeypatch):
+    """A previously-installed unit that is still enabled continues to be (re-)enabled."""
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self, encoding=None: "[Service]\n[Timer]"
+    )
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text, encoding=None: None)
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+
+    def fake_exists(self):
+        return (
+            self.parent.name == "systemd"
+            or str(self) == "/etc/systemd/system/update-seeds.service"
+        )
+
+    monkeypatch.setattr(staticreports.Path, "exists", fake_exists)
+
+    enabled = []
+    monkeypatch.setattr(
+        staticreports.systemd, "service_enable", lambda *args, **kwargs: enabled.append(args)
+    )
+
+    fake_result = SimpleNamespace(stdout="enabled\n")
+    monkeypatch.setattr(staticreports, "run", lambda *args, **kwargs: fake_result)
+
+    sr = staticreports.StaticReports()
+    sr.setup_systemd_unit("update-seeds")
+
+    assert enabled and enabled[0][0] == "--now"
+
+
+def test_setup_systemd_unit_enables_new_unit_without_checking_enabled_state(monkeypatch):
+    """A unit not yet installed (new service) is enabled without querying systemctl."""
+    monkeypatch.setattr(
+        staticreports.Path, "read_text", lambda self, encoding=None: "[Service]\n[Timer]"
+    )
+    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text, encoding=None: None)
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(staticreports.Path, "exists", lambda self: self.parent.name == "systemd")
+
+    enabled = []
+    monkeypatch.setattr(
+        staticreports.systemd, "service_enable", lambda *args, **kwargs: enabled.append(args)
+    )
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("systemctl is-enabled should not be queried for a new unit")
+
+    monkeypatch.setattr(staticreports, "run", fail_run)
+
+    sr = staticreports.StaticReports()
+    sr.setup_systemd_unit("update-seeds")
+
+    assert enabled and enabled[0][0] == "--now"
 
 
 def test_refresh_report_logs_stdout_when_service_start_fails(monkeypatch, caplog):
@@ -399,6 +649,9 @@ def test_install_clones_git_repositories_into_configured_targets(monkeypatch, tm
 
     monkeypatch.setattr(staticreports, "run", fake_run)
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     sr = staticreports.StaticReports()
 
     sr.install()
@@ -424,6 +677,9 @@ def test_install_raises_when_git_clone_fails(monkeypatch):
 
     monkeypatch.setattr(staticreports, "run", bad_run)
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     sr = staticreports.StaticReports()
 
     with pytest.raises(CalledProcessError):
@@ -443,7 +699,7 @@ def test_staticreports_init_configures_proxy_environment_from_juju_vars(monkeypa
 
 
 @patch("staticreports.pathops.LocalPath")
-def test_configure_lpoauthkey_returns_false_on_write_errors(localpathmock):
+def test_configure_lpoauthkey_returns_false_on_write_errors(localpathmock, monkeypatch):
     """Test configure_lpoauthkey handles write errors gracefully.
 
     configure_lpoauthkey should gracefully handle file write errors by returning False
@@ -452,33 +708,11 @@ def test_configure_lpoauthkey_returns_false_on_write_errors(localpathmock):
     inst = localpathmock.return_value
     inst.parent = Path("/nonexistent/home/ubuntu")
     sr = StaticReports()
-    import os as _os
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda *a, **k: None)
 
-    _os_makedirs = _os.makedirs
-
-    # Test FileNotFoundError
-    inst.write_text.side_effect = FileNotFoundError()
-    try:
-        _os.makedirs = lambda *a, **k: None
+    for error in (FileNotFoundError(), LookupError(), PermissionError()):
+        inst.write_text.side_effect = error
         assert sr.configure_lpoauthkey("data") is False
-    finally:
-        _os.makedirs = _os_makedirs
-
-    # Test LookupError
-    inst.write_text.side_effect = LookupError()
-    try:
-        _os.makedirs = lambda *a, **k: None
-        assert sr.configure_lpoauthkey("data") is False
-    finally:
-        _os.makedirs = _os_makedirs
-
-    # Test PermissionError
-    inst.write_text.side_effect = PermissionError()
-    try:
-        _os.makedirs = lambda *a, **k: None
-        assert sr.configure_lpoauthkey("data") is False
-    finally:
-        _os.makedirs = _os_makedirs
 
 
 def test_sru_report_is_a_managed_static_report_service():
@@ -487,6 +721,9 @@ def test_sru_report_is_a_managed_static_report_service():
 
 def test_install_copies_sru_report_script_to_usr_bin(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     monkeypatch.setattr(staticreports, "run", Mock())
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
@@ -503,6 +740,9 @@ def test_install_copies_sru_report_script_to_usr_bin(monkeypatch):
 
 def test_install_creates_pending_sru_output_directory(monkeypatch):
     monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
     monkeypatch.setattr(staticreports, "run", Mock())
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)
