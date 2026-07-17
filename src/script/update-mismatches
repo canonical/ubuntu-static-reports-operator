@@ -16,6 +16,7 @@ matching environment variables (the CLI defaults below). CLI arguments win.
 
 import argparse
 import fcntl
+import gzip
 import logging
 import os
 import shlex
@@ -45,6 +46,61 @@ HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
 def _env_path(name: str, default: Path) -> Path:
     value = os.environ.get(name)
     return Path(value) if value else default
+
+
+# upstream fix: https://code.launchpad.net/~jj/ubuntu-archive-tools/+git/ubuntu-archive-tools/+merge/508635
+# The ubuntu-archive-tools (architecture-mismatches, priority-mismatches, component-mismatches)
+# iterate over these architectures unconditionally.
+# A port not yet bootstrapped for a freshly-opened devel series (or otherwise
+# temporarily/permanently absent) makes those tools crash with a bare
+# FileNotFoundError instead of just reporting zero packages for it.
+#
+# Why the gap exists in the first place: germinate-ubuntu reads the archs to
+# germinate straight from the suite's Release file (_archs_from_release), and
+# a freshly-opened devel series can list an arch there before it's actually
+# published (no binary-<arch> dir synced yet). germinate-ubuntu forks one
+# child process per arch, and each child's _germinate_arch_child() wraps its
+# work in a bare try/except that swallows any failure (e.g. the missing
+# Packages.gz) and just returns an empty result for that arch - so the whole
+# germinate run still "succeeds", silently producing zero output files for
+# it. The three tools above then assume every arch has both a Packages.gz
+# *and* matching germinate output, so they crash on the resulting gap in two
+# independent places, which is why both stubs below are needed.
+KNOWN_ARCHES = ("amd64", "amd64v3", "arm64", "armhf", "i386", "ppc64el", "riscv64", "s390x")
+REFERENCE_ARCH = "amd64"
+
+
+def _stub_missing_archive_arches(mirror: Path) -> None:
+    """Create empty Packages.gz stand-ins for archs missing from the archive mirror."""
+    patterns = (
+        f"dists/*/*/binary-{REFERENCE_ARCH}/Packages.gz",
+        f"dists/*/*/debian-installer/binary-{REFERENCE_ARCH}/Packages.gz",
+    )
+    for pattern in patterns:
+        for reference in mirror.glob(pattern):
+            for arch in KNOWN_ARCHES:
+                candidate = Path(
+                    str(reference).replace(f"binary-{REFERENCE_ARCH}", f"binary-{arch}")
+                )
+                if not candidate.exists():
+                    candidate.parent.mkdir(parents=True, exist_ok=True)
+                    with gzip.open(candidate, "wb"):
+                        pass
+                    logger.warning("Stubbed missing archive index %s.", candidate)
+
+
+def _stub_missing_germinate_arches(germinate_dir: Path) -> None:
+    """Create empty germinate-output stand-ins for archs missing germinate data."""
+    if not germinate_dir.is_dir():
+        return
+    suffix = f"_{REFERENCE_ARCH}"
+    for reference in germinate_dir.glob(f"*{suffix}"):
+        base = reference.name[: -len(suffix)]
+        for arch in KNOWN_ARCHES:
+            candidate = germinate_dir / f"{base}_{arch}"
+            if not candidate.exists():
+                candidate.write_text("")
+                logger.warning("Stubbed missing germinate output %s.", candidate)
 
 
 @dataclass(frozen=True)
@@ -102,6 +158,10 @@ def generate_reports(cfg: Config) -> int:
     _relink(cfg.mirror, snapshot / "ubuntu")
     _relink(cfg.germinate_dir, snapshot / "germinate-release")
     _relink(cfg.germinate_proposed, snapshot / "germinate-proposed")
+
+    _stub_missing_archive_arches(cfg.mirror)
+    _stub_missing_germinate_arches(cfg.germinate_dir)
+    _stub_missing_germinate_arches(cfg.germinate_proposed)
 
     failures = 0
     for name, step in _report_steps(cfg):
