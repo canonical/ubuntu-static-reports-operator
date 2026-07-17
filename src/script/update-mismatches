@@ -25,6 +25,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from distro_info import UbuntuDistroInfo
+from launchpadlib.launchpad import Launchpad
+
 logger = logging.getLogger("update-mismatches")
 
 # The systemd unit runs this as User=ubuntu, so HOME is that account's home
@@ -92,8 +95,7 @@ def generate_reports(cfg: Config) -> int:
         return 0
 
     logger.info("Processing archive snapshot %s.", snapshot_id)
-    if cfg.devel:
-        logger.info("Development series: %s", cfg.devel)
+    logger.info("Development series: %s", cfg.devel)
 
     # Expose this snapshot through the paths the hard-coded tools read, so every
     # report works against one consistent archive + germinate state.
@@ -132,7 +134,7 @@ def _parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--devel",
         default=os.environ.get("DEVEL", ""),
-        help="Development series; autodetected via distro-info when omitted.",
+        help="Development series; fetched from Launchpad when omitted.",
     )
     parser.add_argument(
         "--out",
@@ -150,15 +152,35 @@ def _parse_args(argv=None) -> argparse.Namespace:
 
 
 def _detect_devel_series() -> str:
-    """Return the current development series via distro-info, or "" if unknown."""
+    """Return the current development series via an anonymous Launchpad query.
+
+    Launchpad's current_series is authoritative and always up to date, unlike
+    the distro-info package on this unit, which can lag behind a newly-opened
+    series until it gets updated. That lag isn't an issue for germinate-ubuntu,
+    which discovers series straight from what's actually in the archive
+    mirror rather than from distro-info.
+    """
     try:
-        result = subprocess.run(
-            ["distro-info", "--devel"], check=True, capture_output=True, text=True
-        )
-        return result.stdout.split()[0]
-    except (subprocess.CalledProcessError, FileNotFoundError, IndexError):
-        logger.warning("Could not autodetect the development series via distro-info.")
-        return ""
+        launchpad = Launchpad.login_anonymously("update-mismatches", "production")
+        return launchpad.distributions["ubuntu"].current_series.name
+    except Exception as error:
+        raise RuntimeError("Could not determine the development series via Launchpad.") from error
+
+
+def _supported_series() -> list[str]:
+    """Return currently active series (supported, ESM, or in development), newest first.
+
+    Same "active" computation as update-archive-mirror's _eol_series (just not
+    inverted): a series not yet present in distro_info is simply absent here
+    rather than requiring a separate list to keep up to date.
+    """
+    info = UbuntuDistroInfo()
+    active = set(info.supported()) | set(info.supported_esm())
+    try:
+        active.add(info.devel())
+    except Exception:
+        pass
+    return list(reversed([s for s in info.all if s in active]))
 
 
 def _build_config(args: argparse.Namespace) -> Config:
@@ -267,27 +289,29 @@ def _simple_report(cfg: Config, tool: str, *extra: str) -> None:
 
 def _report_steps(cfg: Config) -> list:
     """Return the (name, callable) report steps to run, in order."""
-    steps = [("component-mismatches", lambda: _component_report(cfg, "component-mismatches"))]
-    if cfg.devel:
-        steps.append(
-            (
+    pocket_series = ",".join(_supported_series())
+    steps = [
+        ("component-mismatches", lambda: _component_report(cfg, "component-mismatches")),
+        (
+            "component-mismatches-proposed",
+            lambda: _component_report(
+                cfg,
                 "component-mismatches-proposed",
-                lambda: _component_report(
-                    cfg,
-                    "component-mismatches-proposed",
-                    "-s",
-                    f"{cfg.devel}-proposed",
-                    "--germinate-path",
-                    str(cfg.germinate_proposed),
-                ),
-            )
-        )
+                "-s",
+                f"{cfg.devel}-proposed",
+                "--germinate-path",
+                str(cfg.germinate_proposed),
+            ),
+        ),
+    ]
     steps += [
         (
             "architecture-mismatches",
             lambda: _simple_report(
                 cfg,
                 "architecture-mismatches",
+                "-s",
+                cfg.devel,
                 "-o",
                 str(cfg.out / "architecture-mismatches.txt"),
                 "--html-output-file",
@@ -301,6 +325,8 @@ def _report_steps(cfg: Config) -> list:
             lambda: _simple_report(
                 cfg,
                 "priority-mismatches",
+                "-s",
+                cfg.devel,
                 "-o",
                 str(cfg.out / "priority-mismatches.txt"),
                 "--html-output-file",
@@ -314,6 +340,7 @@ def _report_steps(cfg: Config) -> list:
             lambda: _simple_report(
                 cfg,
                 "pocket-mismatches",
+                *(["-s", pocket_series] if pocket_series else []),
                 "-o",
                 str(cfg.out / "pocket-mismatches.txt"),
                 "--html-output-file",
