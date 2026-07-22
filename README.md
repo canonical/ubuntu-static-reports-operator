@@ -150,7 +150,7 @@ next, the log output of each and more - use systemctl as the are all systemd
 timers and services.
 
 ```bash
-❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report update-mismatches update-germinate update-archive-mirror
+❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report update-mismatches update-germinate update-nbs update-archive-mirror
 ```
 
 Since the report execution is wrapped into systemd services, one can also use
