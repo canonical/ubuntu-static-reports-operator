@@ -183,7 +183,7 @@ def test_all_timers_are_active(juju: jubilant.Juju):
 
 def test_oncomplete_services_are_enabled(juju: jubilant.Juju):
     """Services triggered via OnSuccess= are installed and enabled after deploy."""
-    services = ["update-germinate", "update-mismatches"]
+    services = ["update-germinate", "update-mismatches", "update-nbs"]
     for service in services:
         state = juju.ssh(
             "ubuntu-static-reports/0", f"systemctl is-enabled {service}.service"
