@@ -45,6 +45,13 @@ HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
 # Take everything after the version colon and split on binary names.
 NBS_LINE_RE = re.compile(r"^\s*o\s+.*?:\s*(.+)$")
 
+# checkrdepends and nbs-report iterate over these architectures for the devel
+# suite. A port not yet bootstrapped for a freshly-opened series (or otherwise
+# absent) has no binary-<arch>/Packages.gz, which makes both tools crash with a
+# bare FileNotFoundError instead of just reporting nothing for it.
+KNOWN_ARCHES = ("amd64", "amd64v3", "arm64", "armhf", "i386", "ppc64el", "riscv64", "s390x")
+REFERENCE_ARCH = "amd64"
+
 @dataclass(frozen=True)
 class Config:
     """Resolved settings for one run (CLI args over environment over defaults)."""
@@ -174,6 +181,25 @@ def _record_processed(cfg: Config, snapshot_id: str) -> None:
         logger.warning("Could not record processed snapshot id to %s.", cfg.state_file)
 
 
+def _stub_missing_arches(mirror: Path) -> None:
+    """Create empty Packages.gz stand-ins for archs missing from the snapshot."""
+    patterns = (
+        f"dists/*/*/binary-{REFERENCE_ARCH}/Packages.gz",
+        f"dists/*/*/debian-installer/binary-{REFERENCE_ARCH}/Packages.gz",
+    )
+    for pattern in patterns:
+        for reference in mirror.glob(pattern):
+            for arch in KNOWN_ARCHES:
+                candidate = Path(
+                    str(reference).replace(f"binary-{REFERENCE_ARCH}", f"binary-{arch}")
+                )
+                if not candidate.exists():
+                    candidate.parent.mkdir(parents=True, exist_ok=True)
+                    with gzip.open(candidate, "wb"):
+                        pass
+                    logger.warning("Stubbed missing archive index %s.", candidate)
+
+
 def _current_binaries(mirror: Path, suite: str) -> set:
     """Return every binary name currently produced by a published source.
 
@@ -299,6 +325,8 @@ def generate_report(cfg: Config) -> int:
     # and nbs-report read <archive_base = archive_path/<distro>>/dists/... .
     archive_path = snapshot
     archive_base = snapshot / cfg.distribution
+
+    _stub_missing_arches(archive_base)
 
     candidates = _candidate_nbs(cfg, archive_path)
     logger.info("archive-cruft-check reported %d candidate NBS binaries.", len(candidates))
