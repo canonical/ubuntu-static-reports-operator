@@ -197,6 +197,12 @@ def test_mismatches_path_is_served(juju: jubilant.Juju):
     assert response.status_code == 200
 
 
+def test_nbs_path_is_served(juju: jubilant.Juju):
+    """The (initially empty) NBS report directory is served by nginx."""
+    response = requests.get(f"http://{address(juju)}:80/nbs/", timeout=30)
+    assert response.status_code == 200
+
+
 @requires_secret
 @requires_archive
 def test_content_mismatches(juju: jubilant.Juju):
