@@ -40,6 +40,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/bugpatterns"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/pending-sru"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/mismatches"), "ubuntu", "ubuntu"),
+    (Path("/srv/staticreports/www/nbs"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 
@@ -66,6 +67,7 @@ UBUNTU_STATIC_REPORT_SERVICES = [
     "update-archive-mirror",
     "update-germinate",
     "update-mismatches",
+    "update-nbs",
 ]
 
 LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
@@ -244,6 +246,7 @@ class StaticReports:
             shutil.copy("src/script/germinate-ubuntu", "/usr/bin")
             shutil.copy("src/script/update-germinate", "/usr/bin")
             shutil.copy("src/script/update-mismatches", "/usr/bin")
+            shutil.copy("src/script/update-nbs", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:

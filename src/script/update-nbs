@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+# Evolved from
+# https://git.launchpad.net/ubuntu-archive-tools/tree/cron.NBS
+"""Generate the NBS report for the static reports site.
+
+Using a provided archive mirror snapshot, collect NBS data and generate a
+report through the following steps:
+
+  1. Use archive-cruft-check to enumerate the candidate NBS binaries for the
+      devel suite from the snapshot.
+  2. Set aside FTBFS packages
+  3. Run checkrdepends to determine what still reverse-depends on each NBS
+     package.
+  4. Run nbs-report to generate the HTML and CSV report.
+
+Options can be passed on the command line or, for charm/systemd use, via the
+matching environment variables (the CLI defaults below). CLI arguments win.
+"""
+
+import argparse
+import fcntl
+import gzip
+import logging
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+from launchpadlib.launchpad import Launchpad
+
+logger = logging.getLogger("update-nbs")
+
+# The systemd unit runs this as User=ubuntu, so HOME is that account's home
+# directory. It anchors this script's own per-run lock and its
+# last-processed-snapshot marker.
+HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
+
+# archive-cruft-check emits its candidate NBS binaries as indented "o" lines:
+#     o 1.2-3: libfoo1, libfoo-bin
+# Take everything after the version colon and split on binary names.
+NBS_LINE_RE = re.compile(r"^\s*o\s+.*?:\s*(.+)$")
+
+# upstream fix: https://code.launchpad.net/~lvoytek/ubuntu-archive-tools/+git/ubuntu-archive-tools/+merge/508941
+# checkrdepends and nbs-report iterate over these architectures for the devel
+# suite. A port not yet bootstrapped for a freshly-opened series (or otherwise
+# absent) has no binary-<arch>/Packages.gz, which makes both tools crash with a
+# bare FileNotFoundError instead of just reporting nothing for it.
+KNOWN_ARCHES = ("amd64", "amd64v3", "arm64", "armhf", "i386", "ppc64el", "riscv64", "s390x")
+REFERENCE_ARCH = "amd64"
+
+@dataclass(frozen=True)
+class Config:
+    """Resolved settings for one run (CLI args over environment over defaults)."""
+
+    uat: Path
+    archive_root: Path
+    out: Path
+    state_file: Path
+    distribution: str
+    devel: str
+    force: bool
+
+
+def main(argv=None) -> int:
+    """Entry point."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    cfg = _build_config(_parse_args(argv))
+    return generate_report(cfg)
+
+
+def _parse_args(argv=None) -> argparse.Namespace:
+    """Parse command-line options, defaulting to the charm/systemd env vars."""
+    parser = argparse.ArgumentParser(
+        description="Generate the Ubuntu archive NBS report from the archive snapshot."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate even if the current archive snapshot was already processed.",
+    )
+    parser.add_argument(
+        "--devel",
+        default=os.environ.get("DEVEL", ""),
+        help="Development series; fetched from Launchpad when omitted.",
+    )
+    parser.add_argument(
+        "--distribution",
+        default=os.environ.get("DISTRIBUTION", "ubuntu"),
+        help="Distribution to check.",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path("/srv/staticreports/www/nbs"),
+        help="Directory to write the report into.",
+    )
+    mirror_dir = Path(os.environ.get("MIRROR_DIR", "/var/cache/mirror/ubuntu"))
+    parser.add_argument(
+        "--archive-root",
+        type=Path,
+        default=Path(
+            os.environ.get("ARCHIVE_ROOT", str(mirror_dir / "archive" / "current"))
+        ),
+        help="Path to the update-archive-mirror snapshot pointer to read.",
+    )
+    return parser.parse_args(argv)
+
+
+def _build_config(args: argparse.Namespace) -> Config:
+    """Resolve a Config from CLI args, with the remaining paths from env/defaults."""
+    return Config(
+        uat=_env_path("UAT", Path("/usr/local/src/ubuntu-archive-tools")),
+        archive_root=args.archive_root,
+        out=args.out,
+        state_file=_env_path("STATE_FILE", HOME / ".update-nbs.state"),
+        distribution=args.distribution,
+        devel=args.devel,
+        force=args.force,
+    )
+
+
+def _env_path(name: str, default: Path) -> Path:
+    value = os.environ.get(name)
+    return Path(value) if value else default
+
+
+def _detect_devel_series() -> str:
+    """Return the current development series via an anonymous Launchpad query.
+
+    Launchpad's current_series is authoritative and always up to date, unlike
+    the distro-info package on this unit, which can lag behind a newly-opened
+    series. archive-cruft-check makes the same query internally when no suite
+    is given, but checkrdepends and nbs-report default to a placeholder suite,
+    so we resolve it once here and pass it to all three consistently.
+    """
+    try:
+        launchpad = Launchpad.login_anonymously("update-nbs", "production")
+        return launchpad.distributions["ubuntu"].current_series.name
+    except Exception as error:
+        raise RuntimeError("Could not determine the development series via Launchpad.") from error
+
+
+def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
+    """Run a command, raising CalledProcessError on failure."""
+    logger.info("Running: %s", shlex.join(str(part) for part in cmd))
+    return subprocess.run(cmd, check=True, **kwargs)
+
+
+def _resolve_snapshot(cfg: Config) -> Path | None:
+    """Resolve the archive root to a snapshot directory, or None if absent."""
+    try:
+        snapshot = cfg.archive_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    return snapshot if snapshot.is_dir() else None
+
+
+def _last_processed(cfg: Config) -> str:
+    try:
+        return cfg.state_file.read_text().strip()
+    except OSError:
+        return ""
+
+
+def _record_processed(cfg: Config, snapshot_id: str) -> None:
+    try:
+        cfg.state_file.write_text(snapshot_id)
+    except OSError:
+        logger.warning("Could not record processed snapshot id to %s.", cfg.state_file)
+
+
+def _stub_missing_arches(mirror: Path) -> None:
+    """Create empty Packages.gz stand-ins for archs missing from the snapshot."""
+    patterns = (
+        f"dists/*/*/binary-{REFERENCE_ARCH}/Packages.gz",
+        f"dists/*/*/debian-installer/binary-{REFERENCE_ARCH}/Packages.gz",
+    )
+    for pattern in patterns:
+        for reference in mirror.glob(pattern):
+            for arch in KNOWN_ARCHES:
+                candidate = Path(
+                    str(reference).replace(f"binary-{REFERENCE_ARCH}", f"binary-{arch}")
+                )
+                if not candidate.exists():
+                    candidate.parent.mkdir(parents=True, exist_ok=True)
+                    with gzip.open(candidate, "wb"):
+                        pass
+                    logger.warning("Stubbed missing archive index %s.", candidate)
+
+
+def _current_binaries(mirror: Path, suite: str) -> set:
+    """Return every binary name currently produced by a published source.
+
+    Read from the suite's Sources indices (the Binary: field). A candidate NBS
+    binary that a source still lists here is really an FTBFS, not NBS, so it is
+    set aside rather than reverse-depends-checked.
+    """
+    binaries: set = set()
+    for sources_gz in (mirror / "dists" / suite).glob("*/source/Sources.gz"):
+        try:
+            with gzip.open(sources_gz, "rt", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if line.startswith("Binary:"):
+                        names = line.split(":", 1)[1]
+                        binaries.update(name.strip() for name in names.split(",") if name.strip())
+        except OSError as error:
+            logger.warning("Could not read %s: %s", sources_gz, error)
+    return binaries
+
+
+def _candidate_nbs(cfg: Config, archive_path: Path) -> list:
+    """Run archive-cruft-check and return its candidate NBS binary names.
+
+    archive-cruft-check prints a human-readable NBS report to stdout; the
+    binary names live on the indented "o <version>: pkg, pkg" lines.
+    """
+    result = _run(
+        [
+            str(cfg.uat / "archive-cruft-check"),
+            "-d",
+            cfg.distribution,
+            "-s",
+            cfg.devel,
+            str(archive_path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    binaries: list = []
+    for line in result.stdout.splitlines():
+        match = NBS_LINE_RE.match(line)
+        if match:
+            for name in match.group(1).replace(",", " ").split():
+                if name not in binaries:
+                    binaries.append(name)
+    return binaries
+
+
+def _checkrdepends(cfg: Config, archive_base: Path, packages: list, workdir: Path) -> None:
+    """Compute reverse dependencies for the NBS binaries into workdir (one file each)."""
+    _run(
+        [
+            str(cfg.uat / "checkrdepends"),
+            "-B",
+            str(archive_base),
+            "-s",
+            cfg.devel,
+            "-b",
+            "-d",
+            str(workdir),
+            *packages,
+        ],
+    )
+
+
+def _nbs_report(cfg: Config, archive_base: Path, workdir: Path) -> None:
+    """Render the checkrdepends work directory into out/nbs.html + out/nbs.csv."""
+    html = cfg.out / "nbs.html"
+    csv = cfg.out / "nbs.csv"
+    tmp_html = cfg.out / ".nbs.html.new"
+    tmp_csv = cfg.out / ".nbs.csv.new"
+    with open(tmp_html, "w", encoding="utf-8") as handle:
+        _run(
+            [
+                str(cfg.uat / "nbs-report"),
+                "-B",
+                str(archive_base),
+                "-d",
+                cfg.distribution,
+                "-s",
+                cfg.devel,
+                "--csv-file",
+                str(tmp_csv),
+                str(workdir) + os.sep,
+            ],
+            stdout=handle,
+        )
+    os.replace(tmp_html, html)
+    os.replace(tmp_csv, csv)
+
+
+def generate_report(cfg: Config) -> int:
+    """Generate the NBS report from the current archive snapshot."""
+    cfg.out.mkdir(parents=True, exist_ok=True)
+
+    lock_handle = open(HOME / ".update-nbs.lock", "w")
+    try:
+        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.info("Another update-nbs run is in progress; exiting.")
+        return 0
+
+    snapshot = _resolve_snapshot(cfg)
+    if snapshot is None:
+        logger.info("No archive snapshot published at %s yet; nothing to do.", cfg.archive_root)
+        return 0
+    if not (snapshot / "STAMP").exists():
+        logger.warning("Snapshot %s has no STAMP; treating it as incomplete.", snapshot.name)
+        return 0
+
+    snapshot_id = snapshot.name
+    if not cfg.force and snapshot_id == _last_processed(cfg):
+        logger.info("Archive snapshot %s already processed; nothing to do.", snapshot_id)
+        return 0
+
+    # Resolve devel series here to avoid Launchpad query before it's needed.
+    cfg = replace(cfg, devel=cfg.devel or _detect_devel_series())
+
+    logger.info("Processing archive snapshot %s.", snapshot_id)
+    logger.info("Development series: %s", cfg.devel)
+
+    # archive-cruft-check reads <archive_path>/<distro>/dists/...; checkrdepends
+    # and nbs-report read <archive_base = archive_path/<distro>>/dists/... .
+    archive_path = snapshot
+    archive_base = snapshot / cfg.distribution
+
+    _stub_missing_arches(archive_base)
+
+    candidates = _candidate_nbs(cfg, archive_path)
+    logger.info("archive-cruft-check reported %d candidate NBS binaries.", len(candidates))
+
+    current_binaries = _current_binaries(archive_base, cfg.devel)
+    ftbfs = [pkg for pkg in candidates if pkg in current_binaries]
+    nbs = [pkg for pkg in candidates if pkg not in current_binaries]
+    logger.info(
+        "%d candidates are FTBFS (still built by a source); %d are NBS.",
+        len(ftbfs),
+        len(nbs),
+    )
+
+    work = Path(tempfile.mkdtemp(prefix="update-nbs."))
+    try:
+        if _build_report(cfg, archive_base, ftbfs, nbs, work) != 0:
+            return 1
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    _record_processed(cfg, snapshot_id)
+    logger.info("NBS report updated in %s from snapshot %s.", cfg.out, snapshot_id)
+    return 0
+
+
+def _build_report(
+    cfg: Config, archive_base: Path, ftbfs: list, nbs: list, work: Path
+) -> int:
+    """Run checkrdepends + nbs-report for `nbs`, publishing into cfg.out."""
+    os.chmod(work, 0o755)
+    # Mirror cron.NBS: FTBFS binaries are recorded in a 00FTBFS marker that
+    # nbs-report deliberately skips, so only genuine NBS binaries get a
+    # reverse-dependency file.
+    if ftbfs:
+        (work / "00FTBFS").write_text("\n".join(sorted(ftbfs)) + "\n")
+    if nbs:
+        try:
+            _checkrdepends(cfg, archive_base, sorted(nbs), work)
+        except subprocess.CalledProcessError:
+            logger.error("checkrdepends failed; keeping the previous report.")
+            return 1
+
+    # Publish the raw per-package reverse-dependency files alongside the report
+    # so the HTML "why" links resolve, then render the report itself.
+    _relink_dir(cfg.out / "NBS", work)
+
+    try:
+        _nbs_report(cfg, archive_base, work)
+    except subprocess.CalledProcessError:
+        logger.error("nbs-report failed; keeping the previous report.")
+        return 1
+    return 0
+
+
+def _relink_dir(published: Path, work: Path) -> None:
+    """Replace `published` with a fresh copy of the `work` directory."""
+    if published.is_symlink() or published.is_file():
+        published.unlink()
+    elif published.is_dir():
+        shutil.rmtree(published)
+    shutil.copytree(work, published)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

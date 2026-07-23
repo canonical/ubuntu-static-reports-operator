@@ -101,6 +101,15 @@ from various sources depending on the respective service.
   * Old location: https://ubuntu-archive-team.ubuntu.com/ \*-mismatches.\*
   * New location: https://static-reports.ubuntu.com/mismatches/
 
+* update-nbs
+  * TL;DR: Generate the NBS ("Not Built from Source") report of binary packages still published in the archive whose source no longer builds them
+  * Timing: after the archive mirror was updated (in parallel with update-germinate)
+  * Execution time: a few minutes when the snapshot changed, seconds otherwise
+  * Code: wrapper `update-nbs` is included in this charm; the underlying tools (archive-cruft-check, checkrdepends, nbs-report) come from ubuntu-archive-tools
+  * Data: Current archive indices (from update-archive-mirror)
+  * Old location: https://ubuntu-archive-team.ubuntu.com/nbs.html
+  * New location: https://static-reports.ubuntu.com/nbs/nbs.html
+
 ## Basic usage
 
 Assuming you have access to a bootstrapped [Juju](https://juju.is) controller, you can deploy the charm with (For details on local manual debug see [CONTRIBUTING.md](CONTRIBUTING.md)):
@@ -141,7 +150,7 @@ next, the log output of each and more - use systemctl as the are all systemd
 timers and services.
 
 ```bash
-❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report update-mismatches update-germinate update-archive-mirror
+❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report update-mismatches update-germinate update-nbs update-archive-mirror
 ```
 
 Since the report execution is wrapped into systemd services, one can also use

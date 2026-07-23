@@ -155,6 +155,7 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     assert ("copy", "src/script/germinate-ubuntu", "/usr/bin") in ops
     assert ("copy", "src/script/update-germinate", "/usr/bin") in ops
     assert ("copy", "src/script/update-mismatches", "/usr/bin") in ops
+    assert ("copy", "src/script/update-nbs", "/usr/bin") in ops
     assert (
         "copy",
         "src/nginx/staticreports.conf",
@@ -479,6 +480,10 @@ def test_update_germinate_is_a_registered_report_service():
 
 def test_update_mismatches_is_a_registered_report_service():
     assert "update-mismatches" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
+
+
+def test_update_nbs_is_a_registered_report_service():
+    assert "update-nbs" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
 
 
 def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
