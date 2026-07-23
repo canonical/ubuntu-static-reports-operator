@@ -144,14 +144,6 @@ def _detect_devel_series() -> str:
         raise RuntimeError("Could not determine the development series via Launchpad.") from error
 
 
-def _tool_env(cfg: Config) -> dict:
-    """Build the report-tool environment with charts.py/utils.py importable."""
-    env = os.environ.copy()
-    pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = f"{cfg.uat}{os.pathsep}{pythonpath}" if pythonpath else str(cfg.uat)
-    return env
-
-
 def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
     """Run a command, raising CalledProcessError on failure."""
     logger.info("Running: %s", shlex.join(str(part) for part in cmd))
@@ -235,7 +227,6 @@ def _candidate_nbs(cfg: Config, archive_path: Path) -> list:
             cfg.devel,
             str(archive_path),
         ],
-        env=_tool_env(cfg),
         stdout=subprocess.PIPE,
         text=True,
     )
@@ -263,7 +254,6 @@ def _checkrdepends(cfg: Config, archive_base: Path, packages: list, workdir: Pat
             str(workdir),
             *packages,
         ],
-        env=_tool_env(cfg),
     )
 
 
@@ -287,7 +277,6 @@ def _nbs_report(cfg: Config, archive_base: Path, workdir: Path) -> None:
                 str(tmp_csv),
                 str(workdir) + os.sep,
             ],
-            env=_tool_env(cfg),
             stdout=handle,
         )
     os.replace(tmp_html, html)
