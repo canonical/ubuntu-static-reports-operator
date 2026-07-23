@@ -50,7 +50,7 @@ requests==2.34.2
     # via ubuntu-static-reports-operator (pyproject.toml)
 ruff==0.15.21
     # via ubuntu-static-reports-operator (pyproject.toml)
-ty==0.0.54
+ty==0.0.63
     # via ubuntu-static-reports-operator (pyproject.toml)
 typing-extensions==4.16.0
     # via
