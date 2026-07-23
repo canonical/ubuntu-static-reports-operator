@@ -45,6 +45,7 @@ HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
 # Take everything after the version colon and split on binary names.
 NBS_LINE_RE = re.compile(r"^\s*o\s+.*?:\s*(.+)$")
 
+# upstream fix: https://code.launchpad.net/~lvoytek/ubuntu-archive-tools/+git/ubuntu-archive-tools/+merge/508941
 # checkrdepends and nbs-report iterate over these architectures for the devel
 # suite. A port not yet bootstrapped for a freshly-opened series (or otherwise
 # absent) has no binary-<arch>/Packages.gz, which makes both tools crash with a
