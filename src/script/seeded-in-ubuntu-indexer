@@ -1,0 +1,255 @@
+#!/usr/bin/python3
+#
+# Copyright (C) 2026, Canonical Ltd.
+# Author: Florent 'Skia' Jacquet <skia@ubuntu.com> driving DeepSeek V4 Flash
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+import argparse
+import gzip
+import json
+import logging
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from launchpadlib.launchpad import Launchpad
+
+
+MIRROR = "http://archive.ubuntu.com/ubuntu/"
+
+
+def _get_arch_map() -> dict[str, list[str]]:
+    lp = Launchpad.login_anonymously("ubuntu-dev-tools", "production", version="devel")
+    ubuntu = lp.distributions["ubuntu"]
+    return {
+        s.name: [a.architecture_tag for a in s.architectures if a.enabled]
+        for s in ubuntu.series
+        if s.active
+    }
+
+
+def discover_flavors(seeds_dir: Path, series: str) -> list[str]:
+    suffix = ".%s" % series
+    _skip_flavors = {"platform", "i386"}
+    flavors = []
+    for entry in seeds_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        if entry.name.endswith(suffix):
+            flavor = entry.name.rsplit(".", 1)[0]
+            if flavor and flavor not in _skip_flavors:
+                flavors.append(flavor)
+    return sorted(flavors)
+
+
+def discover_series(seeds_dir: Path) -> list[str]:
+    pattern = re.compile(r"^[a-z][a-z0-9-]+\.[a-z]+$")
+    series = set()
+    for entry in seeds_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        if pattern.match(entry.name):
+            parts = entry.name.rsplit(".", 1)
+            if len(parts) == 2 and parts[0] and parts[1]:
+                series.add(parts[1])
+    return sorted(series)
+
+
+def run_germinate(
+    flavor: str, series: str, mirror: str, arch: str, seed_source: Path, work_dir: Path
+) -> subprocess.CompletedProcess:
+    seed_dist = "%s.%s" % (flavor, series)
+    cmd = [
+        "germinate",
+        "--seed-source",
+        seed_source,
+        "--seed-dist",
+        seed_dist,
+        "--dist",
+        series,
+        "--arch",
+        arch,
+        "--mirror",
+        mirror,
+        "--components",
+        "main,restricted",
+    ]
+    proc = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True)
+    return proc
+
+
+def parse_package_list(work_dir: Path, seed_name: str) -> set[str]:
+    packages = set()
+    for suffix in (".seed", ".depends"):
+        path = work_dir / (seed_name + suffix)
+        if not path.exists():
+            continue
+        with path.open() as f:
+            for line in f:
+                if "|" not in line:
+                    continue
+                pkg = line.split("|", 1)[0].strip()
+                if not pkg or pkg == "Package":
+                    continue
+                if pkg.strip("-") == "":
+                    continue
+                packages.add(pkg)
+    return packages
+
+
+def collect_seeds(work_dir: Path) -> dict[str, set[str]]:
+    seen = {}
+    for entry in work_dir.iterdir():
+        if entry.suffix == ".seed":
+            seed_name = entry.stem
+            if seed_name == "extra":
+                continue
+            packages = parse_package_list(work_dir, seed_name)
+            if packages:
+                seen[seed_name] = packages
+    return seen
+
+
+def build_index(
+    series: str, mirror: str, arch: str, seed_source: Path
+) -> dict[str, list[list[str]]]:
+    logging.info("Discovering flavors for %s...", series)
+    flavors = discover_flavors(seed_source, series)
+    if not flavors:
+        logging.warning("No flavors found for series %s", series)
+        return {}
+
+    logging.info("Found %d flavors: %s", len(flavors), ", ".join(flavors))
+
+    index = {}
+    for flavor in flavors:
+        logging.info("  Processing %s.%s...", flavor, series)
+        with tempfile.TemporaryDirectory(prefix="seedindex-") as td:
+            work_dir = Path(td)
+            proc = run_germinate(flavor, series, mirror, arch, seed_source, work_dir)
+            if proc.returncode != 0:
+                logging.warning(
+                    "    germinate failed for %s.%s (exit %d)",
+                    flavor,
+                    series,
+                    proc.returncode,
+                )
+                continue
+            seeds = collect_seeds(work_dir)
+            for seed_name, packages in seeds.items():
+                for pkg in packages:
+                    index.setdefault(pkg, []).append([flavor, seed_name])
+        logging.info(
+            "    %d seed types, ~%d total packages",
+            len(seeds),
+            sum(len(p) for p in seeds.values()),
+        )
+
+    return index
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Generate per-series seeded package index from Ubuntu seed files"
+    )
+    parser.add_argument(
+        "--output-dir",
+        "-o",
+        default=".",
+        help="Output directory for seeded-{series}-{arch}.json.gz files. Default: current directory.",
+    )
+    parser.add_argument(
+        "--mirror",
+        "-m",
+        default=MIRROR,
+        help="Ubuntu archive mirror URL. Default: %s" % MIRROR,
+    )
+    parser.add_argument(
+        "--series",
+        "-s",
+        default=None,
+        help="Target series (e.g. noble, resolute). Default: all discovered series in the seeds directory.",
+    )
+    parser.add_argument(
+        "--arch",
+        "-a",
+        default=None,
+        help="Target architecture (e.g. amd64, arm64). Default: all supported architectures for the series.",
+    )
+    parser.add_argument(
+        "--seeds-directory",
+        "-d",
+        required=True,
+        help="Path to local directory containing seed subdirectories (i.e. path with ubuntu.noble/, xubuntu.resolute/ etc.)",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    logging.basicConfig(
+        level=logging.INFO, format="[%(levelname)s] %(message)s", stream=sys.stderr
+    )
+
+    args = parse_args()
+    seeds_dir = Path(args.seeds_directory)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    logging.info("Discovering available series...")
+    series_list = discover_series(seeds_dir)
+    if not series_list:
+        logging.warning("No series found in %s", seeds_dir)
+        return 1
+    logging.info("Found series: %s", ", ".join(series_list))
+
+    if args.series:
+        if args.series not in series_list:
+            logging.fatal(
+                "Provided series (%s) not found in discovered series (%s)",
+                args.series,
+                series_list,
+            )
+            return 1
+        series_list = [args.series]
+        logging.info("Restricting to user provided series: %s", series_list)
+
+    if args.arch is None:
+        logging.info("Querying Launchpad for supported architectures...")
+        try:
+            arch_map = _get_arch_map()
+        except Exception as e:
+            logging.fatal("Failed to query Launchpad: %s", e)
+            return 1
+
+    for series in series_list:
+        arch_list = [args.arch] if args.arch else arch_map[series]
+        for arch in arch_list:
+            logging.info("\nBuilding index for %s/%s...", series, arch)
+            index = build_index(series, args.mirror, arch, seeds_dir)
+            if not index:
+                logging.warning("No data for %s/%s, skipping.", series, arch)
+                continue
+
+            output_path = output_dir / ("seeded-%s-%s.json.gz" % (series, arch))
+            with gzip.open(output_path, "wt", encoding="utf-8") as f:
+                json.dump(index, f, sort_keys=True)
+            logging.info("Wrote %s (%d packages)", output_path, len(index))
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
