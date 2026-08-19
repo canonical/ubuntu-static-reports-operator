@@ -41,6 +41,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/pending-sru"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/mismatches"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/nbs"), "ubuntu", "ubuntu"),
+    (Path("/srv/staticreports/www/seeded-in-ubuntu"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 
@@ -68,12 +69,14 @@ UBUNTU_STATIC_REPORT_SERVICES = [
     "update-germinate",
     "update-mismatches",
     "update-nbs",
+    "seeded-in-ubuntu-indexer",
 ]
 
 LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
 
 ARCHIVE_MIRROR_ENV_PATH = "/etc/staticreports/archive-mirror.env"
 MISMATCHES_ENV_PATH = "/etc/staticreports/mismatches.env"
+SEEDED_IN_UBUNTU_INDEXER_ENV_PATH = "/etc/staticreports/seeded-in-ubuntu-indexer.env"
 
 # germinate's real (hardlink-friendly) storage lives under mirror_dir, next to
 # the archive snapshots; this is the stable web path symlinked to its `current`.
@@ -247,6 +250,7 @@ class StaticReports:
             shutil.copy("src/script/update-germinate", "/usr/bin")
             shutil.copy("src/script/update-mismatches", "/usr/bin")
             shutil.copy("src/script/update-nbs", "/usr/bin")
+            shutil.copy("src/script/seeded-in-ubuntu-indexer", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:
@@ -364,6 +368,23 @@ class StaticReports:
         env_file.parent.mkdir(parents=True, exist_ok=True)
         env_file.write_text(content, encoding="utf-8")
         logger.debug("configure_mismatches: wrote mismatches configuration to %s", env_file)
+
+    def configure_seeded_in_ubuntu_indexer(self, mirror_dir: str):
+        """Write the seeded-in-ubuntu-indexer environment overrides derived from charm config.
+
+        Writes ARCHIVE_ROOT so seeded-in-ubuntu-indexer finds the combined
+        archive+germinate snapshot published by update-germinate. Empty
+        mirror_dir is omitted so the script falls back to its own default.
+        """
+        content = f"ARCHIVE_ROOT={mirror_dir}/germinate/current\n" if mirror_dir else ""
+        env_file = Path(SEEDED_IN_UBUNTU_INDEXER_ENV_PATH)
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(content, encoding="utf-8")
+        logger.debug(
+            "configure_seeded_in_ubuntu_indexer: "
+            "wrote seeded-in-ubuntu-indexer configuration to %s",
+            env_file,
+        )
 
     def refresh_report(self):
         """Refresh all the reports - wait for completion."""

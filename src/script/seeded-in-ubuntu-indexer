@@ -1,47 +1,42 @@
-#!/usr/bin/python3
-#
-# Copyright (C) 2026, Canonical Ltd.
-# Author: Florent 'Skia' Jacquet <skia@ubuntu.com> driving DeepSeek V4 Flash
-#
-# Permission to use, copy, modify, and/or distribute this software for any
-# purpose with or without fee is hereby granted, provided that the above
-# copyright notice and this permission notice appear in all copies.
-#
-# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#!/usr/bin/env python3
+"""Build a reverse index mapping packages to the seeds that include them.
+
+Reads the combined archive+germinate snapshot published by update-germinate
+(its `current` pointer), so the germinate output it consumes is always
+internally consistent with the archive snapshot it was built from. This
+script does no germinate of its own; it simply parses the .seed and .depends
+files that germinate-ubuntu already produced.
+
+For each (series, architecture) present in the germinate output it discovers
+the flavors from the local seed checkouts (the update-seeds output), then
+builds a JSON dictionary mapping package names to
+[[flavor, seed-name], ...] lists.
+
+Output is written as gzipped JSON files named seeded-<series>-<arch>.json.gz.
+
+Options can be passed on the command line or, for charm/systemd use, via the
+matching environment variables (the CLI defaults below). CLI arguments win.
+"""
 
 import argparse
+import fcntl
 import gzip
 import json
 import logging
+import os
 import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-from launchpadlib.launchpad import Launchpad
+logger = logging.getLogger("seeded-in-ubuntu-indexer")
 
+HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
 
-MIRROR = "http://archive.ubuntu.com/ubuntu/"
-
-
-def _get_arch_map() -> dict[str, list[str]]:
-    lp = Launchpad.login_anonymously("ubuntu-dev-tools", "production", version="devel")
-    ubuntu = lp.distributions["ubuntu"]
-    return {
-        s.name: [a.architecture_tag for a in s.architectures if a.enabled]
-        for s in ubuntu.series
-        if s.active
-    }
+GERMINATE_RELEASE = "germinate-release"
 
 
 def discover_flavors(seeds_dir: Path, series: str) -> list[str]:
+    """Return a list of flavors from the seeds folder."""
     suffix = ".%s" % series
     _skip_flavors = {"platform", "i386"}
     flavors = []
@@ -56,6 +51,7 @@ def discover_flavors(seeds_dir: Path, series: str) -> list[str]:
 
 
 def discover_series(seeds_dir: Path) -> list[str]:
+    """Return a list of series from the seeds folder."""
     pattern = re.compile(r"^[a-z][a-z0-9-]+\.[a-z]+$")
     series = set()
     for entry in seeds_dir.iterdir():
@@ -68,91 +64,97 @@ def discover_series(seeds_dir: Path) -> list[str]:
     return sorted(series)
 
 
-def run_germinate(
-    flavor: str, series: str, mirror: str, arch: str, seed_source: Path, work_dir: Path
-) -> subprocess.CompletedProcess:
-    seed_dist = "%s.%s" % (flavor, series)
-    cmd = [
-        "germinate",
-        "--seed-source",
-        seed_source,
-        "--seed-dist",
-        seed_dist,
-        "--dist",
-        series,
-        "--arch",
-        arch,
-        "--mirror",
-        mirror,
-        "--components",
-        "main,restricted",
-    ]
-    proc = subprocess.run(cmd, cwd=work_dir, capture_output=True, text=True)
-    return proc
+def _germinate_archs(germinate_dir: Path) -> set[str]:
+    archs = set()
+    seed_file_pattern = re.compile(r".+_([a-zA-Z0-9]+)$")
+    for entry in germinate_dir.iterdir():
+        m = seed_file_pattern.match(entry.name)
+        if m:
+            archs.add(m.group(1))
+    return archs
 
 
-def parse_package_list(work_dir: Path, seed_name: str) -> set[str]:
+def parse_package_list(path: Path) -> set[str]:
+    """Parse a single package list file."""
     packages = set()
-    for suffix in (".seed", ".depends"):
-        path = work_dir / (seed_name + suffix)
-        if not path.exists():
-            continue
-        with path.open() as f:
-            for line in f:
-                if "|" not in line:
-                    continue
-                pkg = line.split("|", 1)[0].strip()
-                if not pkg or pkg == "Package":
-                    continue
-                if pkg.strip("-") == "":
-                    continue
-                packages.add(pkg)
+    with path.open() as f:
+        for line in f:
+            if "|" not in line:
+                continue
+            pkg = line.split("|", 1)[0].strip()
+            if not pkg or pkg == "Package":
+                continue
+            if pkg.strip("-") == "":
+                continue
+            packages.add(pkg)
     return packages
 
 
-def collect_seeds(work_dir: Path) -> dict[str, set[str]]:
+def parse_germinated_flavor(
+    germinate_dir: Path, flavor: str, series: str, arch: str
+) -> dict[str, set[str]]:
+    """Parse a flavor-series-arch combination from the germinate_dir folder."""
     seen = {}
-    for entry in work_dir.iterdir():
-        if entry.suffix == ".seed":
-            seed_name = entry.stem
-            if seed_name == "extra":
-                continue
-            packages = parse_package_list(work_dir, seed_name)
-            if packages:
-                seen[seed_name] = packages
+    for entry in germinate_dir.iterdir():
+        if entry.name.startswith(("all_", "all.")):
+            continue
+        if not entry.name.endswith(f"{flavor}_{series}_{arch}"):
+            continue
+        packages = parse_package_list(entry)
+        if packages:
+            seed_name = entry.stem.split("_")[0]
+            seen[seed_name] = packages
     return seen
 
 
+def _resolve_snapshot(archive_root: Path) -> Path | None:
+    try:
+        snapshot = archive_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    return snapshot if snapshot.is_dir() else None
+
+
+def _last_processed(state_file: Path) -> str:
+    try:
+        return state_file.read_text().strip()
+    except OSError:
+        return ""
+
+
+def _record_processed(state_file: Path, snapshot_id: str) -> None:
+    try:
+        state_file.write_text(snapshot_id)
+    except OSError:
+        logger.warning("Could not record processed snapshot id to %s.", state_file)
+
+
 def build_index(
-    series: str, mirror: str, arch: str, seed_source: Path
+    series: str, arch: str, seed_source: Path, germinate_dir: Path
 ) -> dict[str, list[list[str]]]:
-    logging.info("Discovering flavors for %s...", series)
+    """Build index."""
+    logger.info("Discovering flavors for %s/%s...", series, arch)
     flavors = discover_flavors(seed_source, series)
     if not flavors:
-        logging.warning("No flavors found for series %s", series)
+        logger.warning("No flavors found for series %s", series)
         return {}
 
-    logging.info("Found %d flavors: %s", len(flavors), ", ".join(flavors))
+    logger.info("Found %d flavors: %s", len(flavors), ", ".join(flavors))
 
     index = {}
     for flavor in flavors:
-        logging.info("  Processing %s.%s...", flavor, series)
-        with tempfile.TemporaryDirectory(prefix="seedindex-") as td:
-            work_dir = Path(td)
-            proc = run_germinate(flavor, series, mirror, arch, seed_source, work_dir)
-            if proc.returncode != 0:
-                logging.warning(
-                    "    germinate failed for %s.%s (exit %d)",
-                    flavor,
-                    series,
-                    proc.returncode,
-                )
-                continue
-            seeds = collect_seeds(work_dir)
-            for seed_name, packages in seeds.items():
-                for pkg in packages:
-                    index.setdefault(pkg, []).append([flavor, seed_name])
-        logging.info(
+        logger.info("  Processing %s.%s/%s...", flavor, series, arch)
+        seeds = parse_germinated_flavor(germinate_dir, flavor, series, arch)
+        if not seeds:
+            logger.warning("    No germinate output found for %s.%s/%s", flavor, series, arch)
+            continue
+        for seed_name, packages in seeds.items():
+            for pkg in packages:
+                index.setdefault(pkg, {flavor: []})[flavor].append(seed_name)
+        for package in index:
+            for flavor in index[package]:
+                index[package][flavor] = sorted(index[package][flavor])
+        logger.info(
             "    %d seed types, ~%d total packages",
             len(seeds),
             sum(len(p) for p in seeds.values()),
@@ -161,94 +163,113 @@ def build_index(
     return index
 
 
-def parse_args():
+def parse_args(argv=None) -> argparse.Namespace:
+    """Parse arguments."""
     parser = argparse.ArgumentParser(
-        description="Generate per-series seeded package index from Ubuntu seed files"
+        description="Generate per-series seeded package index from germinate output."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate even if the current snapshot was already processed.",
+    )
+    mirror_dir = Path(os.environ.get("MIRROR_DIR", "/var/cache/mirror/ubuntu"))
+    default_archive_root = Path(
+        os.environ.get("ARCHIVE_ROOT", str(mirror_dir / "germinate" / "current"))
+    )
+    parser.add_argument(
+        "--archive-root",
+        type=Path,
+        default=default_archive_root,
+        help="Path to the update-germinate snapshot pointer to read.",
     )
     parser.add_argument(
         "--output-dir",
         "-o",
-        default=".",
-        help="Output directory for seeded-{series}-{arch}.json.gz files. Default: current directory.",
-    )
-    parser.add_argument(
-        "--mirror",
-        "-m",
-        default=MIRROR,
-        help="Ubuntu archive mirror URL. Default: %s" % MIRROR,
-    )
-    parser.add_argument(
-        "--series",
-        "-s",
-        default=None,
-        help="Target series (e.g. noble, resolute). Default: all discovered series in the seeds directory.",
-    )
-    parser.add_argument(
-        "--arch",
-        "-a",
-        default=None,
-        help="Target architecture (e.g. amd64, arm64). Default: all supported architectures for the series.",
+        type=Path,
+        default=Path("/srv/staticreports/www/seeded-in-ubuntu"),
+        help="Output directory for seeded-{series}-{arch}.json.gz files.",
     )
     parser.add_argument(
         "--seeds-directory",
         "-d",
-        required=True,
-        help="Path to local directory containing seed subdirectories (i.e. path with ubuntu.noble/, xubuntu.resolute/ etc.)",
+        type=Path,
+        default=Path("/srv/staticreports/www/seeds"),
+        help="Path to local directory containing seed subdirectories.",
     )
-    return parser.parse_args()
-
-
-def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO, format="[%(levelname)s] %(message)s", stream=sys.stderr
+    parser.add_argument(
+        "--state-file",
+        type=Path,
+        default=HOME / ".seeded-in-ubuntu-indexer.state",
+        help="Path to the state file recording the last-processed snapshot.",
     )
+    return parser.parse_args(argv)
 
-    args = parse_args()
-    seeds_dir = Path(args.seeds_directory)
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True, parents=True)
 
-    logging.info("Discovering available series...")
+def generate_indexes(cfg) -> int:
+    """Generate the index files consumed by seeded-in-ubuntu."""
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+
+    snapshot = _resolve_snapshot(cfg.archive_root)
+    if snapshot is None:
+        logger.info("No germinate snapshot published at %s yet; nothing to do.", cfg.archive_root)
+        return 0
+
+    snapshot_id = snapshot.name
+    if not cfg.force and snapshot_id == _last_processed(cfg.state_file):
+        logger.info("Snapshot %s already processed; nothing to do.", snapshot_id)
+        return 0
+
+    germinate_dir = snapshot / GERMINATE_RELEASE
+    if not germinate_dir.is_dir():
+        logger.warning(
+            "Snapshot %s has no %s/ directory; nothing to do.", snapshot_id, GERMINATE_RELEASE
+        )
+        return 0
+
+    logger.info("Processing germinate snapshot %s.", snapshot_id)
+
+    seeds_dir = cfg.seeds_directory
+    if not seeds_dir.is_dir():
+        logger.warning("Seeds directory %s not found; nothing to do.", seeds_dir)
+        return 0
+
     series_list = discover_series(seeds_dir)
     if not series_list:
-        logging.warning("No series found in %s", seeds_dir)
-        return 1
-    logging.info("Found series: %s", ", ".join(series_list))
+        logger.warning("No series found in %s", seeds_dir)
+        return 0
+    logger.info("Found series: %s", ", ".join(series_list))
 
-    if args.series:
-        if args.series not in series_list:
-            logging.fatal(
-                "Provided series (%s) not found in discovered series (%s)",
-                args.series,
-                series_list,
-            )
-            return 1
-        series_list = [args.series]
-        logging.info("Restricting to user provided series: %s", series_list)
-
-    if args.arch is None:
-        logging.info("Querying Launchpad for supported architectures...")
-        try:
-            arch_map = _get_arch_map()
-        except Exception as e:
-            logging.fatal("Failed to query Launchpad: %s", e)
-            return 1
+    archs = _germinate_archs(germinate_dir)
+    if not archs:
+        logger.warning("No architecture data found in %s", germinate_dir)
+        return 0
+    logger.info("Found architectures: %s", ", ".join(sorted(archs)))
 
     for series in series_list:
-        arch_list = [args.arch] if args.arch else arch_map[series]
-        for arch in arch_list:
-            logging.info("\nBuilding index for %s/%s...", series, arch)
-            index = build_index(series, args.mirror, arch, seeds_dir)
+        for arch in sorted(archs):
+            logger.info("\nBuilding index for %s/%s...", series, arch)
+            index = build_index(series, arch, seeds_dir, germinate_dir)
             if not index:
-                logging.warning("No data for %s/%s, skipping.", series, arch)
+                logger.warning("No data for %s/%s, skipping.", series, arch)
                 continue
 
-            output_path = output_dir / ("seeded-%s-%s.json.gz" % (series, arch))
+            output_path = cfg.output_dir / ("seeded-%s-%s.json.gz" % (series, arch))
             with gzip.open(output_path, "wt", encoding="utf-8") as f:
                 json.dump(index, f, sort_keys=True)
-            logging.info("Wrote %s (%d packages)", output_path, len(index))
+            logger.info("Wrote %s (%d packages)", output_path, len(index))
 
+    _record_processed(cfg.state_file, snapshot_id)
+    logger.info(
+        "Seeded-in-ubuntu indexes updated in %s from snapshot %s.", cfg.output_dir, snapshot_id
+    )
     return 0
+
+
+def main(argv=None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = parse_args(argv)
+    return generate_indexes(args)
 
 
 if __name__ == "__main__":

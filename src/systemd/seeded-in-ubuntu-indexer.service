@@ -1,0 +1,21 @@
+[Unit]
+Description=Ubuntu Static Reports - Seeded-in-ubuntu package index
+# Builds a reverse index of which seeds include which packages, using the
+# germinate output already produced by update-germinate. No germinate of
+# its own — purely parses the .seed/.depends files in the combined snapshot.
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/staticreports/seeded-in-ubuntu-indexer.env
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+ExecStart=/usr/bin/seeded-in-ubuntu-indexer

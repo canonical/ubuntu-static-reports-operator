@@ -156,6 +156,7 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     assert ("copy", "src/script/update-germinate", "/usr/bin") in ops
     assert ("copy", "src/script/update-mismatches", "/usr/bin") in ops
     assert ("copy", "src/script/update-nbs", "/usr/bin") in ops
+    assert ("copy", "src/script/seeded-in-ubuntu-indexer", "/usr/bin") in ops
     assert (
         "copy",
         "src/nginx/staticreports.conf",
@@ -427,6 +428,24 @@ def test_configure_mismatches_writes_archive_root_from_mirror_dir(monkeypatch):
     assert content == "ARCHIVE_ROOT=/srv/mirror/germinate/current\n"
 
 
+def test_configure_seeded_in_ubuntu_indexer_writes_archive_root_from_mirror_dir(monkeypatch):
+    written = {}
+    monkeypatch.setattr(
+        staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
+    )
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
+    sr = staticreports.StaticReports()
+
+    sr.configure_seeded_in_ubuntu_indexer("/srv/mirror")
+
+    content = written[staticreports.SEEDED_IN_UBUNTU_INDEXER_ENV_PATH]
+    assert content == "ARCHIVE_ROOT=/srv/mirror/germinate/current\n"
+
+
 def test_configure_archive_mirror_writes_overrides(monkeypatch):
     written = {}
     monkeypatch.setattr(
@@ -484,6 +503,10 @@ def test_update_mismatches_is_a_registered_report_service():
 
 def test_update_nbs_is_a_registered_report_service():
     assert "update-nbs" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
+
+
+def test_seeded_in_ubuntu_indexer_is_a_registered_report_service():
+    assert "seeded-in-ubuntu-indexer" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
 
 
 def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
