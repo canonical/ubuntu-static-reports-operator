@@ -54,6 +54,13 @@ def mock_configure_mismatches():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def mock_configure_seeded_in_ubuntu_index():
+    """Stub configure_seeded_in_ubuntu_indexer so unit tests never write to the host."""
+    with patch("charm.StaticReports.configure_seeded_in_ubuntu_indexer") as mock:
+        yield mock
+
+
 @patch("charm.StaticReports.install")
 @patch("charm.StaticReports.setup_systemd_units")
 def test_install_event_sets_active_status_on_success(systemd_mock, install_mock, ctx, base_state):
