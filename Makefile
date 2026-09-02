@@ -22,9 +22,12 @@ format:
 	uv tool run ruff check --fix $(ALL)
 	uv tool run ruff format $(ALL)
 
+# parallel-mode + combine avoids concurrent coverage runs corrupting
+# the shared .coverage sqlite file (journal_mode=off => no inter-process locking)
 unit:
 	uv run --all-extras \
 		coverage run \
+		--parallel-mode \
 		--source=$(SRC) \
 		-m pytest \
 		--tb native \
@@ -32,6 +35,7 @@ unit:
 		-v \
 		-s \
 		$(ARGS)
+	uv run --all-extras coverage combine
 	uv run --all-extras coverage report
 
 integration:
@@ -51,7 +55,7 @@ integration-execution:
 		$(ARGS)
 
 clean:
-	rm -rf .coverage
+	rm -rf .coverage .coverage.*
 	rm -rf .pytest_cache
 	rm -rf .ruff_cache
 	rm -rf .venv
