@@ -106,6 +106,19 @@ from various sources depending on the respective service.
   * Old location: https://ubuntu-archive-team.ubuntu.com/ \*-mismatches.\*
   * New location: https://static-reports.ubuntu.com/mismatches/
 
+* seeded-in-ubuntu-indexer
+  * TL;DR: Generate the indexes for the `seeded-in-ubuntu` command in `ubuntu-dev-tools`.
+  * Timing: after germinate completed
+  * Execution time: <1 min
+  * Code: the whole script is included in this charm and doesn't depend on any external code
+  * Data: Current germinate snapshot
+  * Old location: http://qa.ubuntuwire.org/ubuntu-seeded-packages/seeded.json.gz
+  * New location: https://static-reports.ubuntu.com/seeded-in-ubuntu/\*.json.gz
+  * Resource consumption:
+    * CPU: Less than 15 seconds on one single core
+    * RAM: systemd reports a less than 400MB memory peak
+    * Disk: about 0.5MB for each index, one index per series+arch combination
+
 * update-nbs
   * TL;DR: Generate the NBS ("Not Built from Source") report of binary packages still published in the archive whose source no longer builds them
   * Timing: after the archive mirror was updated (in parallel with update-germinate)

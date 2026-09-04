@@ -1,0 +1,18 @@
+[Unit]
+Description=Ubuntu Static Reports - Seeded-in-ubuntu package index
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/staticreports/seeded-in-ubuntu-indexer.env
+
+User=ubuntu
+KeyringMode=private
+NoNewPrivileges=true
+PrivateTmp=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+ExecStart=/usr/bin/seeded-in-ubuntu-indexer

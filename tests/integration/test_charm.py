@@ -183,7 +183,7 @@ def test_all_timers_are_active(juju: jubilant.Juju):
 
 def test_onsuccess_services_are_enabled(juju: jubilant.Juju):
     """Services triggered via OnSuccess= are installed but stay static (not enabled)."""
-    services = ["update-germinate", "update-mismatches", "update-nbs"]
+    services = ["update-germinate", "update-mismatches", "update-nbs", "seeded-in-ubuntu-indexer"]
     for service in services:
         state = juju.ssh(
             "ubuntu-static-reports/0", f"systemctl is-enabled {service}.service"
@@ -200,6 +200,12 @@ def test_mismatches_path_is_served(juju: jubilant.Juju):
 def test_nbs_path_is_served(juju: jubilant.Juju):
     """The (initially empty) NBS report directory is served by nginx."""
     response = requests.get(f"http://{address(juju)}:80/nbs/", timeout=30)
+    assert response.status_code == 200
+
+
+def test_seeded_in_ubuntu_path_is_served(juju: jubilant.Juju):
+    """The (initially empty) seeded-in-ubuntu directory is served by nginx."""
+    response = requests.get(f"http://{address(juju)}:80/seeded-in-ubuntu/", timeout=30)
     assert response.status_code == 200
 
 
@@ -245,6 +251,11 @@ def test_content_mismatches(juju: jubilant.Juju):
         juju, unit="ubuntu-static-reports/0", service="update-mismatches.service"
     )
 
+    # update-germinate also triggers seeded-in-ubuntu-indexer via OnSuccess=.
+    wait_oneshot_finished(
+        juju, unit="ubuntu-static-reports/0", service="seeded-in-ubuntu-indexer.service"
+    )
+
     # /germinate/ is a symlink the charm maintains to update-germinate's `current`
     # snapshot, so it only resolves once a snapshot has actually been published.
     response = requests.get(f"http://{address(juju)}:80/germinate/", timeout=30)
@@ -255,4 +266,13 @@ def test_content_mismatches(juju: jubilant.Juju):
         path="mismatches/architecture-mismatches.html",
         startswith="<!DOCTYPE html",
         contains="Architecture mismatches",
+    )
+
+    # seeded-in-ubuntu-indexer should have produced at least one index file.
+    ls = juju.ssh(
+        "ubuntu-static-reports/0",
+        "ls /srv/staticreports/www/seeded-in-ubuntu/seeded-*.json.gz 2>/dev/null | head -1",
+    )
+    assert ls.strip().startswith("/srv/staticreports/www/seeded-in-ubuntu/seeded-"), (
+        f"No seeded index files produced (got: {ls.strip()!r})"
     )
