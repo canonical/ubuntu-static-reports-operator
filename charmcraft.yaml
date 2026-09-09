@@ -38,6 +38,12 @@ storage:
     description: data sets of the static reports
     type: filesystem
     location: /srv/staticreports/
+    # 0-1: allow detaching/removing the instance so it can be re-provisioned
+    # from a different pool (e.g. rootfs -> cinder-nvme) without redeploying
+    # the app - or also vice versa re-deploying the app but detach/attach
+    # the storage so data can persist over to the new instance.
+    multiple:
+      range: 0-1
 
 charm-libs:
   - lib: operator_libs_linux.systemd
