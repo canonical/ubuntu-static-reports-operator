@@ -117,6 +117,7 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
     monkeypatch.setattr(
         staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
     )
+    monkeypatch.setattr(staticreports.StaticReports, "_ensure_swap", lambda self: None)
 
     run_mock = Mock()
     monkeypatch.setattr(staticreports, "run", run_mock)
@@ -171,6 +172,7 @@ def test_install_raises_when_script_copy_fails(monkeypatch):
     monkeypatch.setattr(
         staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
     )
+    monkeypatch.setattr(staticreports.StaticReports, "_ensure_swap", lambda self: None)
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports, "run", lambda *a, **k: Mock())
@@ -683,6 +685,7 @@ def test_refresh_report_logs_stdout_when_service_start_fails(monkeypatch, caplog
 
 
 def test_install_clones_git_repositories_into_configured_targets(monkeypatch, tmp_path):
+    monkeypatch.setattr(staticreports.StaticReports, "_ensure_swap", lambda self: None)
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
 
@@ -786,6 +789,7 @@ def test_install_copies_sru_report_script_to_usr_bin(monkeypatch):
     monkeypatch.setattr(
         staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
     )
+    monkeypatch.setattr(staticreports.StaticReports, "_ensure_swap", lambda self: None)
     monkeypatch.setattr(staticreports, "run", Mock())
     monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
@@ -805,6 +809,7 @@ def test_install_creates_pending_sru_output_directory(monkeypatch):
     monkeypatch.setattr(
         staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
     )
+    monkeypatch.setattr(staticreports.StaticReports, "_ensure_swap", lambda self: None)
     monkeypatch.setattr(staticreports, "run", Mock())
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)
@@ -846,3 +851,202 @@ def test_setup_systemd_unit_for_sru_report_uses_no_launchpad_credentials(monkeyp
     assert "/usr/bin/sru-report" in svc
     assert "LP_CREDENTIALS_FILE" not in svc
     assert "lp-ubuntu-archive-unprivileged-bot.oauth" not in svc
+
+
+# --- Swap file management ---
+
+
+def _record_run(monkeypatch, failures=None):
+    """Record every run() command; optionally fail the first N calls per command."""
+    failures = dict(failures or {})
+    commands = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append(list(cmd))
+        if failures.get(cmd[0], 0) > 0:
+            failures[cmd[0]] -= 1
+            raise CalledProcessError(1, cmd)
+        return Mock()
+
+    monkeypatch.setattr(staticreports, "run", fake_run)
+    return commands
+
+
+def _setup_ensure_swap(monkeypatch, tmp_path, swapfile_exists, active, fstab="", failures=None):
+    """Mock the environment for _ensure_swap and return its observable state.
+
+    All paths (swapfile and fstab) are redirected to the per-test tmp_path
+    directory, so the tests never touch the host filesystem, and every
+    external command is intercepted by _record_run.
+    """
+    swapfile = tmp_path / "swapfile.swp"
+    if swapfile_exists:
+        swapfile.write_text("")
+    fstab_path = tmp_path / "fstab"
+    fstab_path.write_text(fstab)
+    monkeypatch.setattr(staticreports, "SWAPFILE", swapfile)
+    monkeypatch.setattr(staticreports, "FSTAB_PATH", fstab_path)
+
+    commands = _record_run(monkeypatch, failures=failures)
+
+    chmods = []
+    monkeypatch.setattr(staticreports.os, "chmod", lambda p, mode: chmods.append((str(p), mode)))
+    monkeypatch.setattr(staticreports.StaticReports, "_swap_is_active", lambda self: active)
+
+    sr = staticreports.StaticReports()
+    return sr, fstab_path, commands, chmods
+
+
+def test_swap_is_active_detects_active_swapfile(monkeypatch):
+    commands = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append(list(cmd))
+        return SimpleNamespace(stdout="/swapfile.swp\n")
+
+    monkeypatch.setattr(staticreports, "run", fake_run)
+    sr = staticreports.StaticReports()
+
+    assert sr._swap_is_active() is True
+    assert commands == [["swapon", "--noheadings", "--show=NAME"]]
+
+
+def test_swap_is_active_false_for_other_swap_devices(monkeypatch):
+    monkeypatch.setattr(
+        staticreports, "run", lambda cmd, **kwargs: SimpleNamespace(stdout="/dev/sda2\n")
+    )
+    sr = staticreports.StaticReports()
+
+    assert sr._swap_is_active() is False
+
+
+def test_swap_is_active_raises_when_swapon_query_fails(monkeypatch):
+    def bad_run(cmd, **kwargs):
+        raise CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(staticreports, "run", bad_run)
+    sr = staticreports.StaticReports()
+
+    with pytest.raises(CalledProcessError):
+        sr._swap_is_active()
+
+
+def test_ensure_swap_noop_when_already_active(monkeypatch, tmp_path):
+    sr, fstab_path, commands, chmods = _setup_ensure_swap(
+        monkeypatch, tmp_path, swapfile_exists=True, active=True
+    )
+
+    sr._ensure_swap()
+
+    assert [cmd[0] for cmd in commands] == []
+    assert chmods == []
+    assert fstab_path.read_text() == staticreports.SWAP_FSTAB_ENTRY + "\n"
+
+
+def test_ensure_swap_creates_missing_swapfile(monkeypatch, tmp_path):
+    sr, fstab_path, commands, chmods = _setup_ensure_swap(
+        monkeypatch, tmp_path, swapfile_exists=False, active=False
+    )
+
+    sr._ensure_swap()
+
+    assert [cmd[0] for cmd in commands] == ["fallocate", "mkswap", "swapon"]
+    assert commands[0] == ["fallocate", "-l", staticreports.SWAP_SIZE, str(staticreports.SWAPFILE)]
+    assert (str(staticreports.SWAPFILE), 0o600) in chmods
+    assert fstab_path.read_text() == staticreports.SWAP_FSTAB_ENTRY + "\n"
+
+
+@pytest.mark.parametrize("failing_step", ["fallocate", "mkswap"])
+def test_ensure_swap_raises_when_creation_fails(monkeypatch, tmp_path, failing_step):
+    """Any failure while creating the swap file raises and skips the fstab entry."""
+    sr, fstab_path, commands, chmods = _setup_ensure_swap(
+        monkeypatch, tmp_path, swapfile_exists=False, active=False, failures={failing_step: 1}
+    )
+
+    with pytest.raises(CalledProcessError):
+        sr._ensure_swap()
+
+    assert fstab_path.read_text() == ""
+
+
+def test_ensure_swap_activates_existing_inactive_swapfile_without_touching_it(
+    monkeypatch, tmp_path
+):
+    """An existing swapfile is kept as-is: only activated and persisted."""
+    sr, fstab_path, commands, chmods = _setup_ensure_swap(
+        monkeypatch, tmp_path, swapfile_exists=True, active=False
+    )
+
+    sr._ensure_swap()
+
+    assert [cmd[0] for cmd in commands] == ["swapon"]
+    assert chmods == []
+    assert fstab_path.read_text() == staticreports.SWAP_FSTAB_ENTRY + "\n"
+
+
+def test_ensure_swap_raises_when_activating_existing_file_fails(monkeypatch, tmp_path):
+    """A failing swapon on an existing file raises; it is never re-formatted."""
+    sr, fstab_path, commands, chmods = _setup_ensure_swap(
+        monkeypatch, tmp_path, swapfile_exists=True, active=False, failures={"swapon": 1}
+    )
+
+    with pytest.raises(CalledProcessError):
+        sr._ensure_swap()
+
+    assert [cmd[0] for cmd in commands] == ["swapon"]
+    assert fstab_path.read_text() == ""
+
+
+def test_ensure_swap_does_not_duplicate_fstab_entry(monkeypatch, tmp_path):
+    fstab = f"UUID=1234 / ext4 defaults 0 1\n{staticreports.SWAP_FSTAB_ENTRY}\n"
+    sr, fstab_path, commands, chmods = _setup_ensure_swap(
+        monkeypatch, tmp_path, swapfile_exists=True, active=True, fstab=fstab
+    )
+
+    sr._ensure_swap()
+
+    assert fstab_path.read_text() == fstab
+
+
+@pytest.mark.parametrize(
+    "existing_line",
+    [
+        f"# {staticreports.SWAP_FSTAB_ENTRY}",
+        "/swapfile.swp.old none swap sw 0 0",
+        "/swapfile.swp none swap defaults 0 0",
+    ],
+    ids=["commented", "lookalike-path", "different-options"],
+)
+def test_ensure_swap_appends_fstab_entry_when_no_exact_line_exists(
+    monkeypatch, tmp_path, existing_line
+):
+    """Any line that is not the exact swap entry must not suppress appending it."""
+    fstab = existing_line + "\n"
+    sr, fstab_path, commands, chmods = _setup_ensure_swap(
+        monkeypatch, tmp_path, swapfile_exists=True, active=True, fstab=fstab
+    )
+
+    sr._ensure_swap()
+
+    assert fstab_path.read_text() == fstab + staticreports.SWAP_FSTAB_ENTRY + "\n"
+
+
+def test_install_ensures_swap(monkeypatch):
+    monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
+    ensured = []
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_ensure_swap", lambda self: ensured.append(True)
+    )
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda dir_path, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    monkeypatch.setattr(staticreports.shutil, "copy", lambda src, dst: None)
+    monkeypatch.setattr(staticreports.Path, "unlink", lambda self, missing_ok=True: None)
+    monkeypatch.setattr(staticreports, "run", Mock())
+    sr = staticreports.StaticReports()
+
+    sr.install()
+
+    assert ensured == [True]

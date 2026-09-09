@@ -86,6 +86,15 @@ SEEDED_IN_UBUNTU_INDEXER_ENV_PATH = "/etc/staticreports/seeded-in-ubuntu-indexer
 GERMINATE_WEB_PATH = Path("/srv/staticreports/www/germinate")
 DEFAULT_MIRROR_DIR = "/srv/staticreports"
 
+# Swap file used as safety net against OOM kills during report generation.
+# Lives on the root filesystem (the charm storage is detachable and may be
+# re-provisioned, so it must not hold swap). An existing swapfile is kept
+# as-is; the charm only ensures it is active and persistent across reboots.
+SWAPFILE = Path("/swapfile.swp")
+SWAP_SIZE = "8G"
+FSTAB_PATH = Path("/etc/fstab")
+SWAP_FSTAB_ENTRY = f"{SWAPFILE} none swap sw 0 0"
+
 
 def _relink(link: Path, target: str) -> None:
     """Point `link` at `target`, replacing any existing file/dir/symlink."""
@@ -197,18 +206,63 @@ class StaticReports:
                 logger.warning("Creating directory %s failed: %s", dir_path, e)
                 raise
 
+    def _swap_is_active(self) -> bool:
+        """Return True if SWAPFILE is listed as an active swap device."""
+        result = run(
+            ["swapon", "--noheadings", "--show=NAME"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return str(SWAPFILE) in result.stdout.split()
+
+    def _ensure_fstab_entry(self):
+        """Ensure /etc/fstab contains the swapfile entry so it survives reboots.
+
+        Idempotent: the entry is appended only when no line exactly matching
+        SWAP_FSTAB_ENTRY exists yet, so the charm never duplicates its line.
+        """
+        fstab = FSTAB_PATH.read_text()
+        if any(line == SWAP_FSTAB_ENTRY for line in fstab.splitlines()):
+            logger.debug("%s already present in %s", SWAP_FSTAB_ENTRY, FSTAB_PATH)
+            return
+
+        with FSTAB_PATH.open("a", encoding="utf-8") as f:
+            f.write(SWAP_FSTAB_ENTRY + "\n")
+        logger.info("Appended %s to %s", SWAP_FSTAB_ENTRY, FSTAB_PATH)
+
+    def _ensure_swap(self):
+        """Ensure the swap file exists, is active, and is persistent.
+
+        An existing swap file is never recreated, resized, or re-formatted;
+        it is only activated and persisted in /etc/fstab.
+        """
+        if self._swap_is_active():
+            logger.info("Swap file %s already active, keeping it as-is", SWAPFILE)
+        else:
+            if SWAPFILE.exists():
+                logger.info("Swap file %s present but inactive, activating it", SWAPFILE)
+            else:
+                logger.info("No swap file at %s, creating %s swap", SWAPFILE, SWAP_SIZE)
+                run(["fallocate", "-l", SWAP_SIZE, str(SWAPFILE)], check=True)
+                os.chmod(SWAPFILE, 0o600)
+                run(["mkswap", str(SWAPFILE)], check=True)
+            run(["swapon", str(SWAPFILE)], check=True)
+
+        self._ensure_fstab_entry()
+
     def install(self):
         """Set up the environment required for the static reports."""
         logger.info("Install required deb packages")
         self._install_packages()
 
-        logger.info("Install 1/5 Configuring automatic security and stable updates")
+        logger.info("Install 1/6 Configuring automatic security and stable updates")
         self._configure_unattended_upgrades()
 
-        logger.info("Install 2/5 Create the required directories")
+        logger.info("Install 2/6 Create the required directories")
         self.setup_storage()
 
-        logger.info("Install 3/5 Updating repositories")
+        logger.info("Install 3/6 Updating repositories")
         for repo_url, repo_branch, repo_target in REPO_URLS:
             logger.debug("Handle repository %s", repo_url)
             try:
@@ -251,7 +305,7 @@ class StaticReports:
                 logger.warning("Git handling %s failed: %s", repo_url, e)
                 raise
 
-        logger.info("Install 4/5 Installing App and Config files")
+        logger.info("Install 4/6 Installing App and Config files")
         try:
             shutil.copy("src/script/update-bugpatterns", "/usr/bin")
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
@@ -269,8 +323,11 @@ class StaticReports:
             logger.warning("Error copying files: %s", str(e))
             raise
 
-        logger.info("Install 5/5 Removing default Nginx configuration")
+        logger.info("Install 5/6 Removing default Nginx configuration")
         Path("/etc/nginx/sites-enabled/default").unlink(missing_ok=True)
+
+        logger.info("Install 6/6 Ensuring swap file for OOM resilience")
+        self._ensure_swap()
 
     def start(self):
         """Start all services of the Ubuntu static reports, but do not wait."""
