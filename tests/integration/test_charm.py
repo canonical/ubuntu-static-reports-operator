@@ -191,6 +191,15 @@ def test_onsuccess_services_are_enabled(juju: jubilant.Juju):
         assert state == "static", f"{service}.service is not static"
 
 
+def test_swapfile_is_active_and_persistent(juju: jubilant.Juju):
+    """The charm-ensured swap file is active and referenced in /etc/fstab."""
+    swaps = juju.ssh("ubuntu-static-reports/0", "cat /proc/swaps")
+    assert "/swapfile.swp" in swaps, f"/swapfile.swp not active in /proc/swaps: {swaps}"
+
+    fstab = juju.ssh("ubuntu-static-reports/0", "cat /etc/fstab")
+    assert "/swapfile.swp" in fstab, f"/swapfile.swp not present in /etc/fstab: {fstab}"
+
+
 def test_mismatches_path_is_served(juju: jubilant.Juju):
     """The (initially empty) mismatches report directory is served by nginx."""
     response = requests.get(f"http://{address(juju)}:80/mismatches/", timeout=30)

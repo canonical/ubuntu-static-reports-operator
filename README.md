@@ -155,6 +155,23 @@ Machine  State    Address        Inst id         Base          AZ  Message
 
 On first start up, the charm will install the application and install a systemd timer unit to trigger tracker updates on a regular basis.
 
+### Swap file (OOM resilience)
+
+Report generation can be memory hungry; to make the unit resilient against
+out-of-memory kills, the charm ensures an 8G swap file at `/swapfile.swp` on
+the root filesystem (the detachable charm storage must not hold swap). On
+install, re-deploy and charm upgrades alike:
+
+* if `/swapfile.swp` already exists it is kept as-is (never recreated or
+  resized) and only ensured to be active,
+* if it is missing it is created via `fallocate` with mode 0600, `mkswap`
+  and activated,
+* and `/etc/fstab` is updated (idempotently) so the swap file also survives
+  reboots.
+
+If setting up or activating the swap file fails (e.g. not enough space on
+the root disk) the unit goes into blocked state.
+
 To refresh the report, you can use the provided Juju [Action](https://documentation.ubuntu.com/juju/3.6/howto/manage-actions/):
 
 ```bash
