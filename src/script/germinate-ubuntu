@@ -82,10 +82,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Seed base URL.",
     )
     parser.add_argument(
-        "flavours",
-        nargs="*",
-        default=None,
-        help="Flavours to germinate (default: all found in the seed source).",
+        "--flavours",
+        help="Comma-separated flavours to germinate (default: all found in the seed source).",
     )
     return parser.parse_args(argv)
 
@@ -95,6 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args(argv)
     seed_bases = [args.seed_source] if args.seed_source else None
+    flavours = None
+    if args.flavours:
+        flavours = [f.strip() for f in args.flavours.split(",") if f.strip()]
 
     germinate_logger = logging.getLogger("germinate")
     germinate_logger.setLevel(logging.INFO)
@@ -127,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 germinate_suite(
                     suite,
-                    args.flavours,
+                    flavours,
                     args.archiveroot,
                     outdir,
                     seed_bases,
@@ -265,7 +266,11 @@ def _write_germinate_output(
     germinator.write_provides_list(structure, path("provides"))
     structure.write(path("structure"))
     structure.write_dot(path("structure.dot"))
-    germinator.write_blacklisted(structure, path("blacklisted"))
+    # renamed to write_blocklisted in newer germinate
+    if hasattr(germinator, "write_blocklisted"):
+        germinator.write_blocklisted(structure, path("blocklisted"))
+    else:
+        germinator.write_blacklisted(structure, path("blacklisted"))
     # The old CLI writes an "extra" pseudo-seed alongside the real seeds; it
     # has no seed text or source list of its own.
     for seedname in [*structure.names, "extra"]:
@@ -313,7 +318,11 @@ def _germinate_arch(
             series = suite.split("-")[0]
             try:
                 with Seed(seed_bases, f"{flavour}.{series}", "blacklist") as blacklist:
-                    germinator.parse_blacklist(structure, blacklist)
+                    # renamed to parse_blocklist in newer germinate
+                    if hasattr(germinator, "parse_blocklist"):
+                        germinator.parse_blocklist(structure, blacklist)
+                    else:
+                        germinator.parse_blacklist(structure, blacklist)
             except SeedError:
                 pass
         germinator.grow(structure)
