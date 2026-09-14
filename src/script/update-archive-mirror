@@ -163,7 +163,9 @@ def sync_archive(mirror: Path, archive_source: str, ports_source: str) -> None:
     """Sync the primary archive and ports indices into separate work trees."""
     _rsync_archive(mirror, archive_source)
     if ports_source:
-        _rsync_archive(mirror.parent / "ubuntu-ports", ports_source)
+        ports_mirror = mirror.parent / "ubuntu-ports"
+        ports_mirror.mkdir(parents=True, exist_ok=True)
+        _rsync_archive(ports_mirror, ports_source)
 
 
 def _write_stamp(snapshot: Path, releases: dict) -> None:
