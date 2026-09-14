@@ -318,10 +318,6 @@ def _germinate_arch(
                 pass
         germinator.grow(structure)
         germinator.add_extras(structure)
-        # Match the old germinate CLI: follow build-depends globally so the
-        # <supported>+build-depends output covers the reachable set.
-        # TODO: replace with a public Germinator API once germinate grows one.
-        germinator._always_follow_build_depends = True
         _write_germinate_output(
             germinator, structure, outdir, flavour, suite, arch, seed_outputs, pocket
         )
