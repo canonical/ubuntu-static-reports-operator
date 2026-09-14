@@ -81,7 +81,7 @@ SEEDED_IN_UBUNTU_INDEXER_ENV_PATH = "/etc/staticreports/seeded-in-ubuntu-indexer
 # germinate's real (hardlink-friendly) storage lives under mirror_dir, next to
 # the archive snapshots; this is the stable web path symlinked to its `current`.
 # Each snapshot root serves the canonical flavours/<flavour>/<series>/<pocket>/
-# tree, the flat/<pocket>/ and germinate-output/release/<flavour>.<series>/
+# tree, the flat/<pocket>/ and germinate-output/<pocket>/<flavour>.<series>/
 # hardlink views built by update-germinate, and the archive/ indices + STAMP.
 GERMINATE_WEB_PATH = Path("/srv/staticreports/www/germinate")
 DEFAULT_MIRROR_DIR = "/srv/staticreports"

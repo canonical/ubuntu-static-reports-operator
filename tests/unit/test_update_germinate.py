@@ -78,10 +78,15 @@ def test_legacy_view_strips_suffix_and_hardlinks(update_germinate, staging):
     assert (legacy / "kubuntu.resolute" / "desktop").exists()
 
 
-def test_legacy_view_is_release_only(update_germinate, staging):
+def test_legacy_view_covers_proposed(update_germinate, staging):
     update_germinate._build_views(staging)
 
-    assert not (staging / "germinate-output" / "proposed").exists()
+    legacy = staging / "germinate-output" / "proposed"
+    tree_file = staging / "flavours" / "ubuntu" / "resolute" / "proposed"
+    tree_file /= "desktop_ubuntu_resolute_amd64"
+    legacy_file = legacy / "ubuntu.resolute" / "desktop"
+    assert legacy_file.read_text() == tree_file.read_text()
+    assert os.stat(legacy_file).st_ino == os.stat(tree_file).st_ino
 
 
 def test_legacy_view_links_germinate_log(update_germinate, staging):
