@@ -152,11 +152,12 @@ def test_config_changed_event_configures_url_and_oauth_on_success(
 def test_config_changed_event_writes_archive_mirror_overrides_from_config(
     mock_configure_archive_mirror, ctx
 ):
-    """The archive rsync config and mirror_dir options are passed to configure_archive_mirror."""
+    """The archive rsync configs and mirror_dir options are passed to configure_archive_mirror."""
     state = State(
         leader=True,
         config={
             "rsync_archive_source": "rsync://host/dists/",
+            "rsync_ports_source": "rsync://ports-host/ubuntu-ports/dists/",
             "mirror_dir": "/srv/mirror",
         },
     )
@@ -165,6 +166,7 @@ def test_config_changed_event_writes_archive_mirror_overrides_from_config(
 
     mock_configure_archive_mirror.assert_called_once_with(
         archive_rsync_source="rsync://host/dists/",
+        ports_rsync_source="rsync://ports-host/ubuntu-ports/dists/",
         mirror_dir="/srv/mirror",
     )
 

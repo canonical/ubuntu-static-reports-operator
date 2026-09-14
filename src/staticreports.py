@@ -386,7 +386,9 @@ class StaticReports:
         )
         return key_success
 
-    def configure_archive_mirror(self, archive_rsync_source: str, mirror_dir: str):
+    def configure_archive_mirror(
+        self, archive_rsync_source: str, mirror_dir: str, ports_rsync_source: str
+    ):
         """Write the archive-mirror environment overrides from charm config.
 
         The update-archive-mirror systemd unit reads these via EnvironmentFile, so
@@ -399,6 +401,7 @@ class StaticReports:
         """
         overrides = {
             "RSYNC_ARCHIVE_SOURCE": archive_rsync_source,
+            "RSYNC_PORTS_SOURCE": ports_rsync_source,
             "MIRROR_DIR": mirror_dir,
         }
         content = "".join(f"{k}={v}\n" for k, v in overrides.items() if v)

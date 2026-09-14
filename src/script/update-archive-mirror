@@ -54,6 +54,13 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="rsync source for the archive indices (the dists tree).",
     )
     parser.add_argument(
+        "--ports-rsync-source",
+        default=os.environ.get(
+            "RSYNC_PORTS_SOURCE", "rsync://rsync.ports.ubuntu.com/ubuntu-ports/dists/"
+        ),
+        help="rsync source for the ports archive indices (merged into the same dists tree).",
+    )
+    parser.add_argument(
         "--retention",
         type=int,
         default=int(os.environ.get("RETENTION", "3")),
@@ -68,7 +75,7 @@ def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, **kwargs)
 
 
-def _release_mtimes(mirror: Path) -> dict:
+def _release_mtimes(mirror: Path) -> dict[str, float]:
     """Map each mirrored Release file to its mtime (0 when unreadable)."""
     snapshot = {}
     for release in (mirror / "dists").glob("*/Release"):
@@ -95,8 +102,36 @@ def _eol_series() -> list[str]:
     return [s for s in info.all if s not in active]
 
 
-def rsync_archive(mirror: Path, source: str) -> None:
-    """Mirror the archive indices (never the pool), skipping unsupported series."""
+def _merge_ports_into_snapshot(snapshot_ubuntu: Path, ports_mirror: Path) -> None:
+    """Hardlink the ports mirror's Packages indices into the snapshot's dists tree.
+
+    The snapshot already contains the primary archive's tree (a hardlink
+    copy made by cp -al); existing destinations are skipped, so ports
+    only fills paths the primary does not publish. Ports' Release and
+    Sources files are not taken; they describe a different archive.
+    """
+    dists = ports_mirror / "dists"
+    if not dists.is_dir():
+        return
+    for packages in [
+        *dists.glob("*/*/binary-*/Packages*"),
+        *dists.glob("*/*/debian-installer/binary-*/Packages*"),
+    ]:
+        rel = packages.relative_to(dists)
+        dest = snapshot_ubuntu / "dists" / rel
+        if dest.exists():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.link(packages, dest)
+
+
+def _rsync_archive(mirror: Path, source: str) -> None:
+    """Mirror one archive's indices (never the pool) into its own work tree.
+
+    The tree is a full self-contained mirror, so --delete and
+    --delete-excluded correctly prune anything the source no longer
+    publishes (EOL series, dropped architectures).
+    """
     series_filters = []
     for series in _eol_series():
         series_filters += ["--exclude", f"{series}*"]
@@ -122,6 +157,13 @@ def rsync_archive(mirror: Path, source: str) -> None:
             f"{mirror}/dists/",
         ]
     )
+
+
+def sync_archive(mirror: Path, archive_source: str, ports_source: str) -> None:
+    """Sync the primary archive and ports indices into separate work trees."""
+    _rsync_archive(mirror, archive_source)
+    if ports_source:
+        _rsync_archive(mirror.parent / "ubuntu-ports", ports_source)
 
 
 def _write_stamp(snapshot: Path, releases: dict) -> None:
@@ -158,12 +200,14 @@ def gc_snapshots(publish_root: Path, retention: int) -> None:
 def sync_and_publish(
     out: Path,
     archive_rsync_source: str,
+    ports_rsync_source: str,
     retention: int = 3,
     force: bool = False,
 ) -> int:
     """Run one sync-and-publish cycle; returns 0 on success."""
     work = out / "work"
     mirror = work / "ubuntu"
+    ports_mirror = work / "ubuntu-ports"
     current = out / "current"
 
     mirror.mkdir(parents=True, exist_ok=True)
@@ -176,16 +220,12 @@ def sync_and_publish(
         logger.info("Another update-archive-mirror run is in progress; exiting.")
         return 0
 
-    before = _release_mtimes(mirror)
-    try:
-        rsync_archive(mirror, archive_rsync_source)
-    except subprocess.CalledProcessError:
-        logger.error("Archive index rsync from %s failed.", archive_rsync_source)
-        return 1
-    after = _release_mtimes(mirror)
+    before = (_release_mtimes(mirror), _release_mtimes(ports_mirror))
+    sync_archive(mirror, archive_rsync_source, ports_rsync_source)
+    primary_mtimes, ports_mtimes = _release_mtimes(mirror), _release_mtimes(ports_mirror)
 
     have_current = current.is_symlink() and current.exists()
-    rebuild = force or not have_current or before != after
+    rebuild = force or not have_current or (before != (primary_mtimes, ports_mtimes))
     if not rebuild:
         logger.info("No archive changes since last snapshot; nothing to do.")
         return 0
@@ -201,7 +241,9 @@ def sync_and_publish(
     # Freeze the just-synced indices with hardlinks so a later rsync into
     # the work mirror cannot mutate the staged snapshot.
     _run(["cp", "-al", str(mirror), str(staging / "ubuntu")])
-    _write_stamp(staging, after)
+    _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
+    # stamp is for main archive Release file
+    _write_stamp(staging, primary_mtimes)
     snapshot = out / snapshot_name
     os.rename(staging, snapshot)
     swap_current(out, snapshot)
@@ -217,6 +259,7 @@ def main(argv=None) -> int:
     return sync_and_publish(
         out=args.out,
         archive_rsync_source=args.archive_rsync_source,
+        ports_rsync_source=args.ports_rsync_source,
         retention=args.retention,
         force=args.force,
     )

@@ -124,6 +124,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
 
         self._staticreports.configure_archive_mirror(
             archive_rsync_source=str(self.config.get("rsync_archive_source", "")),
+            ports_rsync_source=str(self.config.get("rsync_ports_source", "")),
             mirror_dir=str(self.config.get("mirror_dir", "")),
         )
         logger.debug("config change done - archive-sync overrides written")

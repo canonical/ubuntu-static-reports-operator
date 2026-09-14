@@ -78,6 +78,16 @@ config:
         (ftpmaster.internal::ubuntu-dists/) on units that can reach it directly.
       type: string
       default: "rsync://rsync.archive.ubuntu.com/ubuntu/dists/"
+    rsync_ports_source:
+      description: |
+        rsync source for the Ubuntu ports archive indices (the dists tree),
+        merged by update-archive-mirror into the same snapshot so the
+        ports-only architectures (armhf, ppc64el, riscv64, s390x) are
+        mirrored next to the primary archive's. Empty disables the ports
+        sync; the consuming reports then only see primary-archive
+        architectures.
+      type: string
+      default: "rsync://rsync.ports.ubuntu.com/ubuntu-ports/dists/"
     mirror_dir:
       description: |
         Directory where update-archive-mirror and update-germinate publish
