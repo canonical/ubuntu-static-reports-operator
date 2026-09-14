@@ -62,6 +62,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Directory holding the flavour.series seed checkouts.",
     )
     parser.add_argument(
+        "--flavours",
+        help="Comma-separated flavours to restrict to (default: all).",
+    )
+    parser.add_argument(
         "--max-attempts",
         type=int,
         default=int(os.environ.get("MAX_ATTEMPTS", "5")),
@@ -162,8 +166,16 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     args.workdir.mkdir(parents=True, exist_ok=True)
 
+    flavours = flavor_maintainers()
+    if args.flavours:
+        selected = {f.strip() for f in args.flavours.split(",") if f.strip()}
+        unknown = selected - flavours.keys()
+        if unknown:
+            raise SystemExit(f"Unknown flavours: {', '.join(sorted(unknown))}")
+        flavours = {f: flavours[f] for f in flavours if f in selected}
+
     update_seeds(
-        flavor_maintainers(),
+        flavours,
         args.workdir,
         args.max_attempts,
         args.initial_delay,

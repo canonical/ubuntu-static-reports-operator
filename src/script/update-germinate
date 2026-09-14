@@ -16,7 +16,7 @@ root, next to the hardlinked archive indices:
   flat/<pocket>/                       every flavour's files for one pocket
                                        in a single directory, for
                                        component-mismatches et al.
-  germinate-output/release/<flavour>.<series>/
+  germinate-output/<pocket>/<flavour>.<series>/
                                        the old archive-team site layout
                                        (legacy filenames, plus the
                                        _germinate_output log), so the old
@@ -173,17 +173,18 @@ def _build_views(staging: Path) -> None:
             dest_dir.mkdir(parents=True, exist_ok=True)
             _hardlink(tree_file, dest_dir / tree_file.name)
 
-    for series_dir in flavours.glob("*/*/release"):
-        flavour, series = series_dir.parent.parent.name, series_dir.parent.name
-        legacy_arch = "i386" if flavour == "i386" else "amd64"
-        legacy_dir = staging / "germinate-output" / "release" / f"{flavour}.{series}"
-        legacy_dir.mkdir(parents=True, exist_ok=True)
-        for entry in series_dir.iterdir():
-            suffix = f"_{flavour}_{series}_{legacy_arch}"
-            if entry.is_file() and entry.name.endswith(suffix):
-                _hardlink(entry, legacy_dir / entry.name[: -len(suffix)])
-        # The old site also exposes the germinate log as _germinate_output.
-        _hardlink(flavours / "germinate.output", legacy_dir / "_germinate_output")
+    for pocket in ("release", "proposed"):
+        for series_dir in flavours.glob(f"*/*/{pocket}"):
+            flavour, series = series_dir.parent.parent.name, series_dir.parent.name
+            legacy_arch = "i386" if flavour == "i386" else "amd64"
+            legacy_dir = staging / "germinate-output" / pocket / f"{flavour}.{series}"
+            legacy_dir.mkdir(parents=True, exist_ok=True)
+            for entry in series_dir.iterdir():
+                suffix = f"_{flavour}_{series}_{legacy_arch}"
+                if entry.is_file() and entry.name.endswith(suffix):
+                    _hardlink(entry, legacy_dir / entry.name[: -len(suffix)])
+            # The old site also exposes the germinate log as _germinate_output.
+            _hardlink(flavours / "germinate.output", legacy_dir / "_germinate_output")
 
 
 def _write_stamp(snapshot: Path, archive_snapshot_name: str, seeds_mt: float) -> None:

@@ -81,7 +81,7 @@ SEEDED_IN_UBUNTU_INDEXER_ENV_PATH = "/etc/staticreports/seeded-in-ubuntu-indexer
 # germinate's real (hardlink-friendly) storage lives under mirror_dir, next to
 # the archive snapshots; this is the stable web path symlinked to its `current`.
 # Each snapshot root serves the canonical flavours/<flavour>/<series>/<pocket>/
-# tree, the flat/<pocket>/ and germinate-output/release/<flavour>.<series>/
+# tree, the flat/<pocket>/ and germinate-output/<pocket>/<flavour>.<series>/
 # hardlink views built by update-germinate, and the archive/ indices + STAMP.
 GERMINATE_WEB_PATH = Path("/srv/staticreports/www/germinate")
 DEFAULT_MIRROR_DIR = "/srv/staticreports"
@@ -386,7 +386,9 @@ class StaticReports:
         )
         return key_success
 
-    def configure_archive_mirror(self, archive_rsync_source: str, mirror_dir: str):
+    def configure_archive_mirror(
+        self, archive_rsync_source: str, mirror_dir: str, ports_rsync_source: str
+    ):
         """Write the archive-mirror environment overrides from charm config.
 
         The update-archive-mirror systemd unit reads these via EnvironmentFile, so
@@ -399,6 +401,7 @@ class StaticReports:
         """
         overrides = {
             "RSYNC_ARCHIVE_SOURCE": archive_rsync_source,
+            "RSYNC_PORTS_SOURCE": ports_rsync_source,
             "MIRROR_DIR": mirror_dir,
         }
         content = "".join(f"{k}={v}\n" for k, v in overrides.items() if v)

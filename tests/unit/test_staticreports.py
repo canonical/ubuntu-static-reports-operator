@@ -498,10 +498,15 @@ def test_configure_archive_mirror_writes_overrides(monkeypatch):
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     sr = staticreports.StaticReports()
 
-    sr.configure_archive_mirror("rsync://host/dists/", "/srv/staticreports")
+    sr.configure_archive_mirror(
+        "rsync://host/dists/",
+        "/srv/staticreports",
+        ports_rsync_source="rsync://ports-host/ubuntu-ports/dists/",
+    )
 
     content = written[staticreports.ARCHIVE_MIRROR_ENV_PATH]
     assert "RSYNC_ARCHIVE_SOURCE=rsync://host/dists/" in content
+    assert "RSYNC_PORTS_SOURCE=rsync://ports-host/ubuntu-ports/dists/" in content
     assert "MIRROR_DIR=/srv/staticreports" in content
     assert (
         relinked[str(staticreports.GERMINATE_WEB_PATH)] == "/srv/staticreports/germinate/current"
@@ -521,8 +526,7 @@ def test_configure_archive_mirror_relinks_germinate_to_default_when_mirror_dir_e
     monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
     sr = staticreports.StaticReports()
 
-    sr.configure_archive_mirror("", "")
-
+    sr.configure_archive_mirror("", "", ports_rsync_source="")
     assert (
         relinked[str(staticreports.GERMINATE_WEB_PATH)]
         == f"{staticreports.DEFAULT_MIRROR_DIR}/germinate/current"
