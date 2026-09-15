@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""Benchmark the clone loop that dominates update-seeds' runtime.
+
+Repeatedly clones every (flavour, series) ubuntu-seeds branch into a fresh
+scratch directory, with up to --workers concurrent clones, and reports
+min/avg/max durations both per full run and per individual clone. Use it to
+measure how slow the current approach is, and to decide when it has become
+fast enough.
+
+Deliberately self-contained: this file is meant to be copied around (e.g.
+sent by email) and run anywhere that has python3, git, and
+python3-distro-info. It shares nothing with the other scripts in this
+repository; keep FLAVOURS and the series selection below in sync with
+src/script/update-seeds.
+"""
+
+import argparse
+import logging
+import shutil
+import statistics
+import subprocess
+import sys
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+logger = logging.getLogger("benchmark-seeds")
+
+# flavour -> (Launchpad team, earliest series with seeds) — the same table
+# update-seeds walks; bump both when flavours or series are added.
+FLAVOURS = {
+    "platform": ("ubuntu-core-dev", "jammy"),
+    "ubuntu": ("ubuntu-core-dev", "jammy"),
+    "kubuntu": ("kubuntu-dev", "jammy"),
+    "edubuntu": ("edubuntu-dev", "noble"),
+    "xubuntu": ("xubuntu-dev", "jammy"),
+    "i386": ("ubuntu-core-dev", "jammy"),
+    "ubuntustudio": ("ubuntustudio-dev", "jammy"),
+    "lubuntu": ("lubuntu-dev", "jammy"),
+    "ubuntukylin": ("ubuntukylin-members", "jammy"),
+    "ubuntucinnamon": ("ubuntucinnamon-dev", "noble"),
+    "ubuntu-core": ("ubuntu-core-dev", "jammy"),
+    "ubuntu-mate": ("ubuntu-mate-dev", "jammy"),
+    "ubuntu-budgie": ("ubuntubudgie-dev", "jammy"),
+    "ubuntu-unity": ("unity7maintainers", "noble"),
+}
+
+ATTEMPTS = 4  # one initial clone plus three retries
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line options."""
+    parser = argparse.ArgumentParser(
+        description="Measure how long cloning all seed branches takes."
+    )
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=10,
+        help="Number of full clone passes to time (default: 10).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Clones to run concurrently (default: 4).",
+    )
+    args = parser.parse_args(argv)
+    if args.runs < 1 or args.workers < 1:
+        parser.error("--runs and --workers must be at least 1")
+    return args
+
+
+def seed_targets() -> list[tuple[str, str, str]]:
+    """Return the (repo, branch, directory) triples update-seeds would clone."""
+    try:
+        from distro_info import UbuntuDistroInfo  # ty: ignore[unresolved-import]
+    except ImportError as exc:
+        raise RuntimeError(
+            "cannot determine the active series without distro_info"
+            " (apt install python3-distro-info)"
+        ) from exc
+
+    info = UbuntuDistroInfo()
+    active = set(info.supported()) | set(info.supported_esm())
+    try:
+        active.add(info.devel())
+    except Exception:
+        pass
+    series = [s for s in info.all if s in active]  # in release order
+
+    targets = []
+    for flavour, (team, since) in FLAVOURS.items():
+        repo = f"https://git.launchpad.net/~{team}/ubuntu-seeds/+git/{flavour}"
+        for s in series[series.index(since) :]:
+            targets.append((repo, s, f"{flavour}.{s}"))
+    return targets
+
+
+def clone_with_retry(repo: str, branch: str, dest: Path) -> float | None:
+    """Clone into `dest`, cleaning up and retrying on failure.
+
+    Returns the seconds the successful attempt took, or None if every
+    attempt failed.
+    """
+    for attempt in range(1, ATTEMPTS + 1):
+        start = time.perf_counter()
+        proc = subprocess.run(["git", "clone", "--quiet", "--branch", branch, repo, str(dest)])
+        if proc.returncode == 0:
+            return time.perf_counter() - start
+        logger.warning("Clone of %s (%s) failed, attempt %d/%d.", repo, branch, attempt, ATTEMPTS)
+        shutil.rmtree(dest, ignore_errors=True)
+    return None
+
+
+def run_once(targets: list[tuple[str, str, str]], workers: int) -> tuple[list[float], int]:
+    """Clone every target into a fresh scratch dir; returns (durations, failures)."""
+    with tempfile.TemporaryDirectory(prefix="benchmark-seeds.") as tmp:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(clone_with_retry, repo, branch, Path(tmp) / name)
+                for repo, branch, name in targets
+            ]
+            results = [f.result() for f in futures]
+    return [r for r in results if r is not None], results.count(None)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point; 0 on success, 1 if any clone failed, 2 on setup errors."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    args = parse_args(argv)
+
+    try:
+        targets = seed_targets()
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        return 2
+
+    logger.info(
+        "Benchmarking %d seed clones: %d runs, %d workers.",
+        len(targets),
+        args.runs,
+        args.workers,
+    )
+    run_seconds: list[float] = []
+    clone_seconds: list[float] = []
+    failed = 0
+    for run in range(1, args.runs + 1):
+        start = time.perf_counter()
+        durations, flops = run_once(targets, args.workers)
+        run_seconds.append(time.perf_counter() - start)
+        clone_seconds.extend(durations)
+        failed += flops
+        logger.info(
+            "run %d/%d: %d/%d clones in %.1fs",
+            run,
+            args.runs,
+            len(targets) - flops,
+            len(targets),
+            run_seconds[-1],
+        )
+
+    logger.info(
+        "runs   %d: min %.1fs, avg %.1fs, max %.1fs",
+        args.runs,
+        min(run_seconds),
+        statistics.mean(run_seconds),
+        max(run_seconds),
+    )
+    if clone_seconds:
+        logger.info(
+            "clones %d: min %.2fs, avg %.2fs, max %.2fs (%d failed)",
+            len(clone_seconds),
+            min(clone_seconds),
+            statistics.mean(clone_seconds),
+            max(clone_seconds),
+            failed,
+        )
+    else:
+        logger.error("No clone succeeded (%d failed).", failed)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
