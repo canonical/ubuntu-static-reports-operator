@@ -32,7 +32,7 @@ show_missing = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
-pythonpath = [".", "lib", "src"]
+pythonpath = [".", "lib", "src", "src/script"]
 
 # Linting tools configuration
 [tool.ruff]
@@ -66,5 +66,5 @@ skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage"
 include = ["src/**.py"]
 
 [tool.ty.environment]
-# Resolve the charm's first-party modules (src/) and bundled charm libs (lib/).
-extra-paths = ["lib", "src"]
+# Resolve the charm's first-party modules (src/, src/script/) and bundled charm libs (lib/).
+extra-paths = ["lib", "src", "src/script"]
