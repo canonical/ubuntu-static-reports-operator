@@ -55,6 +55,8 @@ REPO_URLS = [
 
 NGINX_SITE_CONFIG_PATH = Path("/etc/nginx/conf.d/staticreports.conf")
 
+ROBOTS_TXT_WEB_PATH = Path("/srv/staticreports/www/robots.txt")
+
 UNATTENDED_UPGRADES_CONFIG_PATH = Path("/etc/apt/apt.conf.d/50unattended-upgrades")
 
 UBUNTU_STATIC_REPORT_SERVICES = [
@@ -318,6 +320,8 @@ class StaticReports:
             shutil.copy("src/script/update-nbs", "/usr/bin")
             shutil.copy("src/script/seeded-in-ubuntu-indexer", "/usr/bin")
             shutil.copy("src/nginx/staticreports.conf", NGINX_SITE_CONFIG_PATH)
+            shutil.copy("src/nginx/robots.txt", ROBOTS_TXT_WEB_PATH)
+            shutil.chown(ROBOTS_TXT_WEB_PATH, "ubuntu", "ubuntu")
             logger.debug("App and Config files copied")
         except (OSError, shutil.Error) as e:
             logger.warning("Error copying files: %s", str(e))
