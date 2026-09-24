@@ -163,6 +163,12 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
         "src/nginx/staticreports.conf",
         staticreports.NGINX_SITE_CONFIG_PATH,
     ) in ops
+    assert (
+        "copy",
+        "src/nginx/robots.txt",
+        staticreports.ROBOTS_TXT_WEB_PATH,
+    ) in ops
+    assert ("chown", staticreports.ROBOTS_TXT_WEB_PATH, "ubuntu", "ubuntu") in ops
 
     assert run_mock.called
 
