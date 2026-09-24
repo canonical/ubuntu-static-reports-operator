@@ -82,9 +82,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _series_from(since: str, series: list[str]) -> list[str]:
     """Entries of `series` no older than `since`, per Ubuntu release order."""
-    order = lp_series.all_series()[::-1]  # oldest first, like the old distro-info order
+    order = lp_series.all_series()  # newest first
     start = order.index(since)
-    return [s for s in series if order.index(s) >= start]
+    return [s for s in series if order.index(s) <= start]
 
 
 def _run_with_retry(cmd: list[str], max_attempts: int, initial_delay: float) -> None:
