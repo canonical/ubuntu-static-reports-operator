@@ -12,7 +12,7 @@ charset-normalizer==3.5.1
     # via requests
 coverage==7.16.1
     # via ubuntu-static-reports-operator (pyproject.toml)
-idna==3.19
+idna==3.20
     # via requests
 iniconfig==2.3.0
     # via pytest
