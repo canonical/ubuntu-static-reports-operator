@@ -3,7 +3,9 @@ Description=Ubuntu Static Reports - archive mirror sync
 OnSuccess=update-germinate.service update-nbs.service
 
 [Service]
-Type=oneshot
+Type=notify
+# The script signals READY after acquiring the lock, so the unit shows
+# "running" instead of "activating" during long rsync runs.
 
 User=ubuntu
 KeyringMode=private
