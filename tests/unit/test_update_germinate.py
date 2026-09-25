@@ -1,10 +1,11 @@
 # Copyright 2026 Canonical
 # See LICENSE file for licensing details.
 
-"""Unit tests for the hardlink views update-germinate builds into each snapshot."""
+"""Unit tests for update-germinate: notify integration and snapshot views."""
 
 import importlib.util
 import os
+import socket
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -112,6 +113,27 @@ def test_hardlink_raises_on_conflicting_dest(update_germinate, staging):
 
     with pytest.raises(FileExistsError):
         update_germinate._hardlink(src, dest)
+
+
+def _bound_notify_socket(monkeypatch, tmp_path):
+    """Bind a unix datagram socket and point NOTIFY_SOCKET at it."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    path = tmp_path / "notify.sock"
+    sock.bind(str(path))
+    sock.settimeout(2)
+    monkeypatch.setenv("NOTIFY_SOCKET", str(path))
+    return sock
+
+
+def test_sd_notify_sends_datagram(update_germinate, monkeypatch, tmp_path):
+    sock = _bound_notify_socket(monkeypatch, tmp_path)
+    update_germinate._sd_notify("READY=1")
+    assert sock.recv(4096) == b"READY=1"
+
+
+def test_sd_notify_is_noop_without_socket(update_germinate, monkeypatch):
+    monkeypatch.delenv("NOTIFY_SOCKET", raising=False)
+    update_germinate._sd_notify("READY=1")  # must not raise
 
 
 def test_hardlink_raises_on_symlink_dest(update_germinate, staging):

@@ -309,6 +309,8 @@ class StaticReports:
 
         logger.info("Install 4/6 Installing App and Config files")
         try:
+            # lp_series.py must be in place before the scripts that import it.
+            shutil.copy("src/script/lp_series.py", "/usr/bin")
             shutil.copy("src/script/update-bugpatterns", "/usr/bin")
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")

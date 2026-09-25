@@ -4,6 +4,16 @@ SRC := $(PROJECT)src
 TESTS := $(PROJECT)tests
 ALL := $(SRC) $(TESTS)
 
+# ruff only discovers *.py on its own; lint the extensionless python scripts
+# explicitly, F-only (undefined names) since full style findings are out of scope.
+PYTHON_SCRIPTS := $(SRC)/script/germinate-ubuntu \
+	$(SRC)/script/seeded-in-ubuntu-indexer \
+	$(SRC)/script/update-archive-mirror \
+	$(SRC)/script/update-germinate \
+	$(SRC)/script/update-mismatches \
+	$(SRC)/script/update-nbs \
+	$(SRC)/script/update-seeds
+
 export PYTHONPATH = $(PROJECT):$(PROJECT)/lib:$(SRC)
 
 update-dependencies:
@@ -15,6 +25,7 @@ generate-requirements:
 
 lint:
 	uv tool run ruff check $(ALL)
+	uv tool run ruff check --select F $(PYTHON_SCRIPTS)
 	uv tool run ruff format --check --diff $(ALL)
 	uv run --all-extras ty check $(ALL)
 

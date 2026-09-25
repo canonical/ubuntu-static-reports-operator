@@ -4,8 +4,8 @@
 Mirrors the ubuntu-seeds git repository branch for each (flavour, series)
 germinate needs into <workdir>/<flavour>.<series>/, skipping series a
 flavour didn't exist in and series that are no longer active (supported,
-ESM, or in development) instead of relying on a hardcoded series list that
-needs updating every release.
+ESM, Legacy, or in development) instead of relying on a hardcoded series
+list that needs updating every release.
 
 Options can be overridden on the command line or via environment variables
 (the systemd unit sets WORKDIR; see update-seeds.service).
@@ -19,28 +19,28 @@ import subprocess
 import time
 from pathlib import Path
 
-from distro_info import UbuntuDistroInfo
+import lp_series
 
 logger = logging.getLogger("update-seeds")
 
 
 def flavor_maintainers() -> dict[str, tuple[str, str]]:
     """Get a list of current flavors, the owning team and the earliest series it has seeds."""
-    # flavour -> (Launchpad team, earliest series)
+    # flavour -> (Launchpad team, earliest series it has seeds)
     return {
-        "platform": ("ubuntu-core-dev", "jammy"),
-        "ubuntu": ("ubuntu-core-dev", "jammy"),
-        "kubuntu": ("kubuntu-dev", "jammy"),
+        "platform": ("ubuntu-core-dev", "trusty"),
+        "ubuntu": ("ubuntu-core-dev", "trusty"),
+        "kubuntu": ("kubuntu-dev", "trusty"),
         "edubuntu": ("edubuntu-dev", "noble"),
-        "xubuntu": ("xubuntu-dev", "jammy"),
-        "i386": ("ubuntu-core-dev", "jammy"),
-        "ubuntustudio": ("ubuntustudio-dev", "jammy"),
-        "lubuntu": ("lubuntu-dev", "jammy"),
-        "ubuntukylin": ("ubuntukylin-members", "jammy"),
-        "ubuntucinnamon": ("ubuntucinnamon-dev", "noble"),
-        "ubuntu-core": ("ubuntu-core-dev", "jammy"),
-        "ubuntu-mate": ("ubuntu-mate-dev", "jammy"),
-        "ubuntu-budgie": ("ubuntubudgie-dev", "jammy"),
+        "xubuntu": ("xubuntu-dev", "trusty"),
+        "i386": ("ubuntu-core-dev", "focal"),
+        "ubuntustudio": ("ubuntustudio-dev", "trusty"),
+        "lubuntu": ("lubuntu-dev", "trusty"),
+        "ubuntukylin": ("ubuntukylin-members", "trusty"),
+        "ubuntucinnamon": ("ubuntucinnamon-dev", "trusty"),
+        "ubuntu-core": ("ubuntu-core-dev", "xenial"),
+        "ubuntu-mate": ("ubuntu-mate-dev", "xenial"),
+        "ubuntu-budgie": ("ubuntubudgie-dev", "bionic"),
         "ubuntu-unity": ("unity7maintainers", "noble"),
     }
 
@@ -80,22 +80,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _active_series() -> list[str]:
-    """Series considered active: currently supported, ESM, or in development."""
-    info = UbuntuDistroInfo()
-    active = set(info.supported()) | set(info.supported_esm())
-    try:
-        active.add(info.devel())
-    except Exception:
-        pass
-    return [s for s in info.all if s in active]
-
-
 def _series_from(since: str, series: list[str]) -> list[str]:
     """Entries of `series` no older than `since`, per Ubuntu release order."""
-    order = UbuntuDistroInfo().all
+    order = lp_series.all_series()  # newest first
     start = order.index(since)
-    return [s for s in series if order.index(s) >= start]
+    return [s for s in series if order.index(s) <= start]
 
 
 def _run_with_retry(cmd: list[str], max_attempts: int, initial_delay: float) -> None:
@@ -152,7 +141,7 @@ def update_seeds(
     update_series: str | None,
 ) -> None:
     """Walk over all given flavours to update their seeds for the selected series."""
-    active = _active_series()
+    active = lp_series.active_series()
     for flavour, (team, since) in flavors.items():
         for series in _series_from(since, active):
             if update_series and series != update_series:
