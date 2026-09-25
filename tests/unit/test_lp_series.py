@@ -206,7 +206,7 @@ def test_archive_mirror_rsync_uses_series_filters(monkeypatch):
     monkeypatch.setattr(mirror, "_run", lambda cmd, **kwargs: commands.append(cmd))
     mirror._rsync_archive(Path("/mirror"), "rsync://src/dists/")
     cmd = commands[0]
-    assert cmd[:4] == ["rsync", "-aq", "--include", "/jammy/"]
+    assert cmd[:5] == ["rsync", "-aq", "--timeout=1200", "--include", "/jammy/"]
     assert "--delete" in cmd
     assert "--delete-excluded" in cmd
     assert "--prune-empty-dirs" in cmd

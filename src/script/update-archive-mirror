@@ -142,6 +142,7 @@ def _rsync_archive(mirror: Path, source: str) -> None:
         [
             "rsync",
             "-aq",
+            "--timeout=1200",
             *_series_filters(),
             *file_filters,
             "--include",
