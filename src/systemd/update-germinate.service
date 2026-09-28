@@ -3,7 +3,9 @@ Description=Ubuntu Static Reports - Germinate archive snapshot
 OnSuccess=update-mismatches.service seeded-in-ubuntu-indexer.service
 
 [Service]
-Type=oneshot
+Type=notify
+# The script signals READY after acquiring the lock, so the unit shows
+# "running" instead of "activating" during long germinate runs.
 # Can be quite CPU hungry. OK when idle but reduce stress to other load
 Nice=15
 CPUWeight=50

@@ -44,6 +44,7 @@ import logging
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -52,6 +53,20 @@ from pathlib import Path
 logger = logging.getLogger("update-germinate")
 
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
+
+
+def _sd_notify(message: str) -> None:
+    """Send one sd_notify(3) message; a no-op when not run from systemd."""
+    socket_name = os.environ.get("NOTIFY_SOCKET")
+    if not socket_name:
+        return
+    if socket_name.startswith("@"):
+        socket_name = "\0" + socket_name[1:]
+    elif not socket_name.startswith("/"):
+        socket_name = "/run/" + socket_name
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notifier:
+        notifier.connect(socket_name)
+        notifier.send(message.encode())
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -248,6 +263,8 @@ def germinate_and_publish(
         logger.info("Another update-germinate run is in progress; exiting.")
         return 0
 
+    # Announce readiness now that this instance is the active worker.
+    _sd_notify("READY=1")
     current_seeds = _seeds_mtime(seed_source)
     have_current = current.is_symlink() and current.exists()
     rebuild = (

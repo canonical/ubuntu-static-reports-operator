@@ -25,8 +25,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from distro_info import UbuntuDistroInfo
-from launchpadlib.launchpad import Launchpad
+import lp_series
 
 logger = logging.getLogger("update-mismatches")
 
@@ -156,35 +155,18 @@ def _parse_args(argv=None) -> argparse.Namespace:
 
 
 def _detect_devel_series() -> str:
-    """Return the current development series via an anonymous Launchpad query.
+    """Return the current development series via the Launchpad API.
 
-    Launchpad's current_series is authoritative and always up to date, unlike
-    the distro-info package on this unit, which can lag behind a newly-opened
-    series until it gets updated. That lag isn't an issue for germinate-ubuntu,
-    which discovers series straight from what's actually in the archive
-    mirror rather than from distro-info.
+    The unreleased series Launchpad knows about is authoritative and always
+    up to date, unlike the distro-info package on this unit, which can lag
+    behind a newly-opened series until it gets updated. That lag isn't an
+    issue for germinate-ubuntu, which discovers series straight from what's
+    actually in the archive mirror rather than from distro-info.
     """
     try:
-        launchpad = Launchpad.login_anonymously("update-mismatches", "production")
-        return launchpad.distributions["ubuntu"].current_series.name
+        return lp_series.devel_series()
     except Exception as error:
         raise RuntimeError("Could not determine the development series via Launchpad.") from error
-
-
-def _supported_series() -> list[str]:
-    """Return currently active series (supported, ESM, or in development), newest first.
-
-    Same "active" computation as update-archive-mirror's _eol_series (just not
-    inverted): a series not yet present in distro_info is simply absent here
-    rather than requiring a separate list to keep up to date.
-    """
-    info = UbuntuDistroInfo()
-    active = set(info.supported()) | set(info.supported_esm())
-    try:
-        active.add(info.devel())
-    except Exception:
-        pass
-    return list(reversed([s for s in info.all if s in active]))
 
 
 def _build_config(args: argparse.Namespace) -> Config:
@@ -293,7 +275,7 @@ def _simple_report(cfg: Config, tool: str, *extra: str) -> None:
 
 def _report_steps(cfg: Config) -> list:
     """Return the (name, callable) report steps to run, in order."""
-    pocket_series = ",".join(_supported_series())
+    pocket_series = ",".join(lp_series.active_series())
     steps = [
         ("component-mismatches", lambda: _component_report(cfg, "component-mismatches")),
         (

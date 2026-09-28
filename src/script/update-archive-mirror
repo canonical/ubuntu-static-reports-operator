@@ -20,16 +20,31 @@ import logging
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from distro_info import UbuntuDistroInfo
+import lp_series
 
 logger = logging.getLogger("update-archive-mirror")
 
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
+
+
+def _sd_notify(message: str) -> None:
+    """Send one sd_notify(3) message; a no-op when not run from systemd."""
+    socket_name = os.environ.get("NOTIFY_SOCKET")
+    if not socket_name:
+        return
+    if socket_name.startswith("@"):
+        socket_name = "\0" + socket_name[1:]
+    elif not socket_name.startswith("/"):
+        socket_name = "/run/" + socket_name
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notifier:
+        notifier.connect(socket_name)
+        notifier.send(message.encode())
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -86,20 +101,21 @@ def _release_mtimes(mirror: Path) -> dict[str, float]:
     return snapshot
 
 
-def _eol_series() -> list[str]:
-    """Return known-EOL series to exclude from the rsync filter.
+def _series_filters() -> list:
+    """Build the series whitelist for the rsync filter list.
 
-    Any series not yet present in distro_info (e.g. a freshly-opened
-    development pocket) is implicitly kept: it won't appear in info.all
-    and therefore won't be added to the exclude list.
+    Only active series (maintained under standard support, ESM, or Legacy,
+    plus the series in development) and the persistent devel alias suites
+    are mirrored. Every other top-level suite dir is excluded, so the
+    file-level includes below cannot pull indices out of EOL series, and
+    --delete-excluded prunes the mirror down to exactly this whitelist.
     """
-    info = UbuntuDistroInfo()
-    active = set(info.supported()) | set(info.supported_esm())
-    try:
-        active.add(info.devel())
-    except Exception:
-        pass
-    return [s for s in info.all if s not in active]
+    filters = []
+    for series in lp_series.active_series():
+        filters += ["--include", f"/{series}/", "--include", f"/{series}-*/"]
+    filters += ["--include", "/devel/", "--include", "/devel-*/"]
+    filters += ["--exclude", "/*/"]
+    return filters
 
 
 def _merge_ports_into_snapshot(snapshot_ubuntu: Path, ports_mirror: Path) -> None:
@@ -130,12 +146,9 @@ def _rsync_archive(mirror: Path, source: str) -> None:
 
     The tree is a full self-contained mirror, so --delete and
     --delete-excluded correctly prune anything the source no longer
-    publishes (EOL series, dropped architectures).
+    publishes or that falls out of the active-series whitelist (EOL
+    series, dropped architectures).
     """
-    series_filters = []
-    for series in _eol_series():
-        series_filters += ["--exclude", f"{series}*"]
-
     file_filters = []
     for pattern in ("Packages*", "Sources*", "Release*", "udeb.list", "**/installer-*/current"):
         file_filters += ["--include", pattern]
@@ -144,7 +157,8 @@ def _rsync_archive(mirror: Path, source: str) -> None:
         [
             "rsync",
             "-aq",
-            *series_filters,
+            "--timeout=1200",
+            *_series_filters(),
             *file_filters,
             "--include",
             "*/",
@@ -222,6 +236,8 @@ def sync_and_publish(
         logger.info("Another update-archive-mirror run is in progress; exiting.")
         return 0
 
+    # Announce readiness now that this instance is the active worker.
+    _sd_notify("READY=1")
     before = (_release_mtimes(mirror), _release_mtimes(ports_mirror))
     sync_archive(mirror, archive_rsync_source, ports_rsync_source)
     primary_mtimes, ports_mtimes = _release_mtimes(mirror), _release_mtimes(ports_mirror)
