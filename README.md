@@ -15,7 +15,7 @@ from various sources depending on the respective service.
 * update-sync-blocklist
   * TL;DR: git checkout and serve as html avoiding pressure on the cgit frontend
   * Timing: every 5 minutes
-  * Execution time: <30 seconds
+  * Execution time: <30 seconds (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-sync-blocklist
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist/tree/sync-blocklist.txt
   * Old location: https://ubuntu-archive-team.ubuntu.com/sync-blocklist.txt
@@ -24,7 +24,7 @@ from various sources depending on the respective service.
 * update-seeds
   * TL;DR: conversion of git branches about the seeds into directories, avoids pressure on the git servers
   * Timing: every 5 minutes
-  * Execution time: ~13 minutes initially, 1 minute on updates
+  * Execution time: ~13 minutes initially, 1 minute on updates (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
   * Data: Maintained in git at `https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}`
   * Old location: https://ubuntu-archive-team.ubuntu.com/seeds/
@@ -33,7 +33,7 @@ from various sources depending on the respective service.
 * package-subscribers
   * TL;DR: convert LP API information about package subscribers to json for faster consumption by other tools
   * Timing: twice an hour
-  * Execution time: ~3 min
+  * Execution time: ~3 min (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/package-subscribers
   * Data: Structural subscriptions in Launchpad of registered teams to source packages
   * Old location: https://ubuntu-archive-team.ubuntu.com/package-team-mapping.json
@@ -42,7 +42,7 @@ from various sources depending on the respective service.
 * permissions-report
   * TL;DR: Convert LP API data into a report about package upload ACLs
   * Timing: every 6 hours
-  * Execution time: ~30 minutes
+  * Execution time: ~30 minutes (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Per Package ACLs stored in Launchpad
   * Old location: https://ubuntu-archive-team.ubuntu.com/archive-permissions/
@@ -51,7 +51,7 @@ from various sources depending on the respective service.
 * packageset-report
   * TL;DR: Convert LP API data into a report about package sets as used for upload permissions
   * Timing: every 6 hours
-  * Execution time: ~30 minutes
+  * Execution time: ~30 minutes (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Package Set information stored in Launchpad
   * Old location: https://ubuntu-archive-team.ubuntu.com/packagesets/
@@ -60,7 +60,7 @@ from various sources depending on the respective service.
 * update-bugpatterns
   * TL;DR: git checkout and serve as XML avoiding pressure on the cgit frontend
   * Timing: every hour
-  * Execution time: <30 seconds
+  * Execution time: <30 seconds (2h timeout)
   * Code: included in this charm
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-bugcontrol/apport/+git/ubuntu-bugpatterns
   * Old location: https://ubuntu-archive-team.ubuntu.com/bugpatterns/bugpatterns.xml
@@ -78,7 +78,7 @@ from various sources depending on the respective service.
 * update-archive-mirror
   * TL;DR: Build and atomically publish one consistent archive-index snapshot that other services (update-germinate, NBS) share as a single source of truth
   * Timing: every 30 minutes, but a new snapshot is only built and swapped in when the archive indices actually changed
-  * Execution time: seconds when nothing changed; under a minute for a full rsync
+  * Execution time: seconds when nothing changed; under a minute for a full rsync (2h timeout)
   * Code: `update-archive-mirror`
   * Data: A local rsync mirror of the archive indices (the `dists` tree) from the archive (configurable via `rsync_archive_source`)
   * Re-used internally by update-germinate (and potentially NBS); not exposed directly via nginx
@@ -86,7 +86,7 @@ from various sources depending on the respective service.
 * update-germinate
   * TL;DR: Germinate the current archive-mirror snapshot against the published seeds, publishing the combined archive+germinate result for other services to consume
   * Timing: after the archive mirror was updated
-  * Execution time: a few minutes when the snapshot changed, seconds otherwise
+  * Execution time: 30 minutes to an hour when the snapshot changed, seconds otherwise (2h timeout)
   * Code: wrapper `update-germinate` is included in this charm; the germinate tool itself comes from https://git.launchpad.net/ubuntu-archive-tools
   * Data: Current archive indices (from update-archive-mirror) and seeds (from update-seeds)
   * Old location: https://ubuntu-archive-team.ubuntu.com/germinate-output/
@@ -100,7 +100,7 @@ from various sources depending on the respective service.
 * update-mismatches
   * TL;DR: Generate the archive override mismatch reports (architecture, component, pocket, priority)
   * Timing: after germinate completed
-  * Execution time: a few minutes when the snapshot changed, seconds otherwise
+  * Execution time: usually <=15 minutes (2h timeout)
   * Code: wrapper `update-mismatches` is included in this charm; the mismatch reports themselves come from https://git.launchpad.net/ubuntu-archive-tools
   * Data: Current germinate snapshot (which already includes the archive indices)
   * Old location: https://ubuntu-archive-team.ubuntu.com/ \*-mismatches.\*
@@ -109,7 +109,7 @@ from various sources depending on the respective service.
 * seeded-in-ubuntu-indexer
   * TL;DR: Generate the indexes for the `seeded-in-ubuntu` command in `ubuntu-dev-tools`.
   * Timing: after germinate completed
-  * Execution time: <1 min
+  * Execution time: <1 min (2h timeout)
   * Code: the whole script is included in this charm and doesn't depend on any external code
   * Data: Current germinate snapshot
   * Old location: http://qa.ubuntuwire.org/ubuntu-seeded-packages/seeded.json.gz
@@ -122,7 +122,7 @@ from various sources depending on the respective service.
 * update-nbs
   * TL;DR: Generate the NBS ("Not Built from Source") report of binary packages still published in the archive whose source no longer builds them
   * Timing: after the archive mirror was updated (in parallel with update-germinate)
-  * Execution time: a few minutes when the snapshot changed, seconds otherwise
+  * Execution time: 2-4 minutes when the snapshot changed, under an hour in complex cases (2h timeout)
   * Code: wrapper `update-nbs` is included in this charm; the underlying tools (archive-cruft-check, checkrdepends, nbs-report) come from ubuntu-archive-tools
   * Data: Current archive indices (from update-archive-mirror)
   * Old location: https://ubuntu-archive-team.ubuntu.com/nbs.html

@@ -3,6 +3,7 @@ Description=Ubuntu Static Reports - Seeds Web view
 
 [Service]
 Type=oneshot
+TimeoutStartSec=2h
 Environment="WORKDIR=/srv/staticreports/www/seeds"
 
 User=ubuntu
