@@ -23,6 +23,7 @@ import gzip
 import logging
 import os
 import re
+import socket
 import shlex
 import shutil
 import subprocess
@@ -69,6 +70,7 @@ class Config:
 def main(argv=None) -> int:
     """Entry point."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    socket.setdefaulttimeout(120)
     cfg = _build_config(_parse_args(argv))
     return generate_report(cfg)
 
