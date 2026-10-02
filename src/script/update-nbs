@@ -147,10 +147,10 @@ def _detect_devel_series() -> str:
         raise RuntimeError("Could not determine the development series via Launchpad.") from error
 
 
-def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
-    """Run a command, raising CalledProcessError on failure."""
+def _run(cmd: list, timeout: int = 7200, **kwargs) -> subprocess.CompletedProcess:
+    """Run a command, raising CalledProcessError or TimeoutExpired."""
     logger.info("Running: %s", shlex.join(str(part) for part in cmd))
-    return subprocess.run(cmd, check=True, **kwargs)
+    return subprocess.run(cmd, check=True, timeout=timeout, **kwargs)
 
 
 def _resolve_snapshot(cfg: Config) -> Path | None:
@@ -367,7 +367,7 @@ def _build_report(
     if nbs:
         try:
             _checkrdepends(cfg, archive_base, sorted(nbs), work)
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             logger.error("checkrdepends failed; keeping the previous report.")
             return 1
 
@@ -377,7 +377,7 @@ def _build_report(
 
     try:
         _nbs_report(cfg, archive_base, work)
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         logger.error("nbs-report failed; keeping the previous report.")
         return 1
     return 0
