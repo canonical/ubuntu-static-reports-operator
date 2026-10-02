@@ -27,7 +27,7 @@ ops==3.8.2
     #   ubuntu-static-reports-operator (pyproject.toml)
     #   charmlibs-pathops
     #   ops-scenario
-ops-scenario==8.8.2
+ops-scenario==8.8.3
     # via ops
 packaging==26.3
     # via pytest
