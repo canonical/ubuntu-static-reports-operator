@@ -3,6 +3,7 @@ Description=Ubuntu Static Reports - NBS report
 
 [Service]
 Type=oneshot
+TimeoutStartSec=2h
 
 User=ubuntu
 KeyringMode=private

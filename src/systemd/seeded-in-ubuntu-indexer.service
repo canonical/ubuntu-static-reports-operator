@@ -3,6 +3,7 @@ Description=Ubuntu Static Reports - Seeded-in-ubuntu package index
 
 [Service]
 Type=oneshot
+TimeoutStartSec=2h
 EnvironmentFile=-/etc/staticreports/seeded-in-ubuntu-indexer.env
 
 User=ubuntu

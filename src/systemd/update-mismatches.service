@@ -6,6 +6,7 @@ ConditionFileNotEmpty=/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oa
 
 [Service]
 Type=oneshot
+TimeoutStartSec=2h
 EnvironmentFile=-/etc/staticreports/mismatches.env
 
 User=ubuntu

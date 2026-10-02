@@ -3,6 +3,7 @@ Description=Ubuntu Static Reports - Sync Blocklist Web view
 
 [Service]
 Type=oneshot
+TimeoutStartSec=2h
 Environment="DESTINATION=/srv/staticreports/www/sync-blocklist.txt"
 
 User=ubuntu

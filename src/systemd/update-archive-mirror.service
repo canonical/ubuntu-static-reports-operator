@@ -6,6 +6,8 @@ OnSuccess=update-germinate.service update-nbs.service
 Type=notify
 # The script signals READY after acquiring the lock, so the unit shows
 # "running" instead of "activating" during long rsync runs.
+TimeoutStartSec=2h
+RuntimeMaxSec=2h
 
 User=ubuntu
 KeyringMode=private

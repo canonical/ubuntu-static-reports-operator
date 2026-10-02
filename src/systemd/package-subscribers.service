@@ -3,6 +3,7 @@ Description=Ubuntu Static Reports - Package Subscribers web view
 
 [Service]
 Type=oneshot
+TimeoutStartSec=2h
 
 User=ubuntu
 KeyringMode=private
