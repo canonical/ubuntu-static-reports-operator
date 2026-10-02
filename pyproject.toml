@@ -19,7 +19,7 @@ dev = [
     "jubilant",
     "ruff",
     "ty",
-    "urllib3>=2.7.0",
+    "urllib3>=2.8.0",
 ]
 
 # Testing tools configuration
