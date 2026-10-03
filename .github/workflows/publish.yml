@@ -9,7 +9,7 @@ on:
 jobs:
   pack-charm:
     name: Prepare charm for upload
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -31,7 +31,7 @@ jobs:
 
   define-matrix:
     name: Define charms upload matrix
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs:
       - pack-charm
     outputs:
@@ -54,7 +54,7 @@ jobs:
 
   publish-to-edge:
     name: Release to CharmHub
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     needs:
