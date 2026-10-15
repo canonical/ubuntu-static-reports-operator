@@ -48,7 +48,7 @@ pyyaml==6.0.3
     #   ops-scenario
 requests==2.34.2
     # via ubuntu-static-reports-operator (pyproject.toml)
-ruff==0.17.0
+ruff==0.17.1
     # via ubuntu-static-reports-operator (pyproject.toml)
 ty==0.0.86
     # via ubuntu-static-reports-operator (pyproject.toml)
