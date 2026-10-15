@@ -31,7 +31,7 @@ ops-scenario==8.9.0
     # via ops
 packaging==26.3
     # via pytest
-pluggy==1.6.0
+pluggy==1.7.0
     # via pytest
 pydantic==2.14.1
     # via ubuntu-static-reports-operator (pyproject.toml)
