@@ -159,9 +159,7 @@ def _detect_devel_series() -> str:
 
     The unreleased series Launchpad knows about is authoritative and always
     up to date, unlike the distro-info package on this unit, which can lag
-    behind a newly-opened series until it gets updated. That lag isn't an
-    issue for germinate-ubuntu, which discovers series straight from what's
-    actually in the archive mirror rather than from distro-info.
+    behind a newly-opened series until it gets updated.
     """
     try:
         return lp_series.devel_series()
