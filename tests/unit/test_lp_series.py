@@ -8,9 +8,11 @@ import importlib.util
 import io
 import json
 import socket
+import sys
 import urllib.error
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import lp_series
 import pytest
@@ -173,6 +175,19 @@ def test_update_mismatches_devel_error_is_wrapped(monkeypatch):
     monkeypatch.setattr(lp_series, "devel_series", devel_series)
     with pytest.raises(RuntimeError, match="development series"):
         mismatches._detect_devel_series()
+
+
+def test_germinate_ubuntu_proposed_germinates_launchpad_devel(monkeypatch, tmp_path):
+    # germinate is apt-only on the unit, absent from the dev venv
+    for module in ("", ".archive", ".germinator", ".log", ".seeds"):
+        monkeypatch.setitem(sys.modules, f"germinate{module}", MagicMock())
+    germinate = _load_script("germinate-ubuntu")
+    suites = []
+    monkeypatch.setattr(lp_series, "devel_series", lambda: "stonking")
+    monkeypatch.setattr(germinate, "germinate_suite", lambda suite, *_, **__: suites.append(suite))
+
+    assert germinate.main(["--pocket", "proposed", "-o", str(tmp_path)]) == 0
+    assert suites == ["stonking-proposed"]
 
 
 def test_archive_mirror_series_filters_are_a_whitelist(monkeypatch):
