@@ -19,10 +19,6 @@ export PYTHONPATH = $(PROJECT):$(PROJECT)/lib:$(SRC)
 update-dependencies:
 	uv lock -U --no-cache
 
-generate-requirements:
-	uv pip compile -q --no-cache pyproject.toml -o requirements.txt
-	uv pip compile -q --no-cache --all-extras pyproject.toml -o requirements-dev.txt
-
 lint:
 	uv tool run ruff check $(ALL)
 	uv tool run ruff check --select F $(PYTHON_SCRIPTS)
