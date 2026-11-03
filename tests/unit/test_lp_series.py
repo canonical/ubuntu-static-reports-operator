@@ -182,12 +182,17 @@ def test_germinate_ubuntu_proposed_germinates_launchpad_devel(monkeypatch, tmp_p
     for module in ("", ".archive", ".germinator", ".log", ".seeds"):
         monkeypatch.setitem(sys.modules, f"germinate{module}", MagicMock())
     germinate = _load_script("germinate-ubuntu")
-    suites = []
+    calls = []
     monkeypatch.setattr(lp_series, "devel_series", lambda: "stonking")
-    monkeypatch.setattr(germinate, "germinate_suite", lambda suite, *_, **__: suites.append(suite))
+
+    def record_germinate(suite, *_, **kwargs):
+        calls.append((suite, kwargs.get("ogre_suites")))
+
+    monkeypatch.setattr(germinate, "germinate_suite", record_germinate)
 
     assert germinate.main(["--pocket", "proposed", "-o", str(tmp_path)]) == 0
-    assert suites == ["stonking-proposed"]
+    expected_ogre = ["stonking", "stonking-security", "stonking-updates", "stonking-proposed"]
+    assert calls == [("stonking-proposed", expected_ogre)]
 
 
 def test_archive_mirror_series_filters_are_a_whitelist(monkeypatch):

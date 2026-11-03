@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
                     outdir,
                     seed_bases,
                     germinate_logger,
-                    ogre_suites=ogre_suites(series),
+                    ogre_suites=ogre_suites(suite),
                     pocket=pocket,
                 )
             except Exception as e:
