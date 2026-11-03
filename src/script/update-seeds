@@ -142,11 +142,23 @@ def update_seeds(
 ) -> None:
     """Walk over all given flavours to update their seeds for the selected series."""
     active = lp_series.active_series()
+    failures = []
     for flavour, (team, since) in flavors.items():
         for series in _series_from(since, active):
             if update_series and series != update_series:
                 continue
-            update_seed_checkout(flavour, series, team, workdir, max_attempts, initial_delay)
+            try:
+                update_seed_checkout(
+                    flavour, series, team, workdir, max_attempts, initial_delay
+                )
+            except Exception as error:
+                logger.error("Failed to update %s.%s: %s", flavour, series, error)
+                failures.append(f"{flavour}.{series}: {error}")
+
+    if failures:
+        raise RuntimeError(
+            f"Failed to update {len(failures)} seed checkout(s): " + ", ".join(failures)
+        )
 
 
 def main(argv: list[str] | None = None) -> None:

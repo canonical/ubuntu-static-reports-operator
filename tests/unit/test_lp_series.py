@@ -160,6 +160,31 @@ def test_update_seeds_series_from_keeps_release_order(monkeypatch):
     assert seeds._series_from("jammy", ["focal", "jammy", "noble"]) == ["jammy", "noble"]
 
 
+def test_update_seeds_continues_after_checkout_failure(monkeypatch, tmp_path):
+    seeds = _load_script("update-seeds")
+    monkeypatch.setattr(lp_series, "active_series", lambda: ["noble", "jammy"])
+    monkeypatch.setattr(lp_series, "all_series", lambda: ["noble", "jammy"])
+    attempted = []
+
+    def fake_update(flavour, series, team, workdir, max_attempts, initial_delay):
+        attempted.append((flavour, series))
+        if (flavour, series) == ("bad", "noble"):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(seeds, "update_seed_checkout", fake_update)
+
+    flavors = {"bad": ("team", "jammy"), "good": ("team", "jammy")}
+    with pytest.raises(RuntimeError, match="Failed to update 1 seed checkout"):
+        seeds.update_seeds(flavors, tmp_path, 1, 0, None)
+
+    assert attempted == [
+        ("bad", "noble"),
+        ("bad", "jammy"),
+        ("good", "noble"),
+        ("good", "jammy"),
+    ]
+
+
 def test_update_mismatches_detect_devel(monkeypatch):
     mismatches = _load_script("update-mismatches")
     monkeypatch.setattr(lp_series, "devel_series", lambda: "stonking")
