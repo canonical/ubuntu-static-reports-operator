@@ -195,6 +195,26 @@ def test_germinate_ubuntu_proposed_germinates_launchpad_devel(monkeypatch, tmp_p
     assert calls == [("stonking-proposed", expected_ogre)]
 
 
+def test_germinate_ubuntu_continues_after_series_failure(monkeypatch, tmp_path):
+    # germinate is apt-only on the unit, absent from the dev venv
+    for module in ("", ".archive", ".germinator", ".log", ".seeds"):
+        monkeypatch.setitem(sys.modules, f"germinate{module}", MagicMock())
+    germinate = _load_script("germinate-ubuntu")
+    attempted = []
+
+    monkeypatch.setattr(germinate, "_series_from_archive", lambda _: ["first", "second"])
+
+    def fail_first(suite, *_, **__):
+        attempted.append(suite)
+        if suite == "first":
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(germinate, "germinate_suite", fail_first)
+
+    assert germinate.main(["-o", str(tmp_path)]) == 1
+    assert attempted == ["first", "second"]
+
+
 def test_archive_mirror_series_filters_are_a_whitelist(monkeypatch):
     mirror = _load_script("update-archive-mirror")
     monkeypatch.setattr(lp_series, "active_series", lambda: ["noble", "jammy", "trusty"])
