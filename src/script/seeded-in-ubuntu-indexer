@@ -190,7 +190,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help="Regenerate even if the current snapshot was already processed.",
     )
-    mirror_dir = Path(os.environ.get("MIRROR_DIR", "/src/staticreports"))
+    mirror_dir = Path(os.environ.get("MIRROR_DIR", "/srv/staticreports"))
     default_archive_root = Path(
         os.environ.get("ARCHIVE_ROOT", str(mirror_dir / "germinate" / "current"))
     )
