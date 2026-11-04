@@ -1,0 +1,21 @@
+name: staging
+base: ubuntu@26.04
+runtime: lxd-vm
+sdks:
+  - name: uv
+  - name: project-staging
+  - name: system
+    slots:
+      lp-oauth:
+        interface: secret
+        attributes:
+          service: launchpad
+          account: lp-ubuntu-archive-unprivileged-bot
+connections:
+  - plug: staging:lp-oauth
+    slot: system:lp-oauth
+actions:
+  lint: make lint
+  format: make format
+  unit: make unit
+  build: sg lxd -c "charmcraft pack --use-lxd $*"

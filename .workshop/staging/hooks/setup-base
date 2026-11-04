@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# System-side setup, runs as root at launch and refresh of the workshop.
+# Installs everything the actions need - actions never install anything.
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update -qq
+apt-get install -y -qq make git
+
+snap install charmcraft --classic
+snap install --classic concierge
+snap install lxd --channel=6/stable
+
+# Nested LXD for charmcraft builds and Juju machines.
+lxd init --auto --storage-backend=dir
+usermod -aG lxd workshop
+
+# The project venv must not live on the /project host mount: a venv built on
+# the host (different absolute paths) would shadow ours inside the VM.
+export UV_PROJECT_ENVIRONMENT=/home/workshop/.venvs/ubuntu-static-reports
+install -d -o workshop -g workshop "$UV_PROJECT_ENVIRONMENT"
+cat >/etc/profile.d/99-uv-project-env.sh <<EOF
+export UV_PROJECT_ENVIRONMENT=$UV_PROJECT_ENVIRONMENT
+EOF
