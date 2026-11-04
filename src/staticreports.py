@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import time
 from pathlib import Path
 from subprocess import PIPE, STDOUT, CalledProcessError, SubprocessError, run
 from urllib.parse import urlparse
@@ -281,45 +282,52 @@ class StaticReports:
         logger.info("Install 3/6 Updating repositories")
         for repo_url, repo_branch, repo_target in REPO_URLS:
             logger.debug("Handle repository %s", repo_url)
-            try:
-                if not repo_target.is_dir():
-                    logger.debug(
-                        "Running: git clone -b %s %s %s", repo_branch, repo_url, repo_target
+            pulling = repo_target.is_dir()
+            # git.launchpad.net serves transient 504s under load; retry with
+            # backoff so one blip cannot brick the install hook.
+            for attempt, delay in enumerate((0, 10, 60), 1):
+                if delay:
+                    time.sleep(delay)
+                try:
+                    if pulling:
+                        logger.debug("Running: git pull (cwd=%s)", repo_target)
+                        run(
+                            ["git", "pull"],
+                            cwd=repo_target,
+                            check=True,
+                            env=self.env,
+                            stdout=PIPE,
+                            stderr=STDOUT,
+                            text=True,
+                            timeout=300,
+                        )
+                    else:
+                        logger.debug(
+                            "Running: git clone -b %s %s %s", repo_branch, repo_url, repo_target
+                        )
+                        run(
+                            [
+                                "git",
+                                "clone",
+                                "-b",
+                                repo_branch,
+                                repo_url,
+                                str(repo_target),
+                            ],
+                            check=True,
+                            env=self.env,
+                            stdout=PIPE,
+                            stderr=STDOUT,
+                            text=True,
+                            timeout=300,
+                        )
+                    break
+                except (CalledProcessError, SubprocessError, FileNotFoundError) as e:
+                    logger.warning(
+                        "Git handling %s failed (attempt %d/3): %s", repo_url, attempt, e
                     )
-                    run(
-                        [
-                            "git",
-                            "clone",
-                            "-b",
-                            repo_branch,
-                            repo_url,
-                            repo_target,
-                        ],
-                        check=True,
-                        env=self.env,
-                        stdout=PIPE,
-                        stderr=STDOUT,
-                        text=True,
-                        timeout=300,
-                    )
-                else:
-                    logger.debug("Running: git pull (cwd=%s)", repo_target)
-                    run(
-                        [
-                            "git",
-                            "pull",
-                        ],
-                        cwd=repo_target,
-                        check=True,
-                        env=self.env,
-                        stdout=PIPE,
-                        stderr=STDOUT,
-                        text=True,
-                        timeout=300,
-                    )
-            except (CalledProcessError, SubprocessError, FileNotFoundError) as e:
-                logger.warning("Git handling %s failed: %s", repo_url, e)
-                raise
+                    if attempt == 3:
+                        raise
 
         logger.info("Install 4/6 Installing App and Config files")
         try:

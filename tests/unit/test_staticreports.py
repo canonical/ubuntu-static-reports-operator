@@ -733,7 +733,7 @@ def test_install_clones_git_repositories_into_configured_targets(monkeypatch, tm
     sr.install()
 
     assert any(
-        isinstance(cmd, (list, tuple)) and "clone" in cmd and cmd[-1] == repo_target
+        isinstance(cmd, (list, tuple)) and "clone" in cmd and Path(cmd[-1]) == repo_target
         for cmd in run_calls
     ), f"expected clone to {repo_target}, got {run_calls}"
 
@@ -747,8 +747,12 @@ def test_install_raises_when_git_clone_fails(monkeypatch):
         "unlink",
         lambda self, missing_ok=True: None,
     )
+    monkeypatch.setattr(staticreports.time, "sleep", lambda s: None)
+
+    attempts = []
 
     def bad_run(cmd, **kwargs):
+        attempts.append(cmd)
         raise CalledProcessError(2, "git")
 
     monkeypatch.setattr(staticreports, "run", bad_run)
@@ -760,6 +764,52 @@ def test_install_raises_when_git_clone_fails(monkeypatch):
 
     with pytest.raises(CalledProcessError):
         sr.install()
+
+    assert len(attempts) == 3, "git clone must be retried 3 times before giving up"
+
+
+def test_install_survives_transient_git_failures(monkeypatch, tmp_path):
+    """A transient Launchpad 504 on the first clone attempt is retried away."""
+    monkeypatch.setattr(staticreports.os, "makedirs", lambda dname, exist_ok=True: None)
+    monkeypatch.setattr(staticreports.shutil, "chown", lambda path, u, g: None)
+    monkeypatch.setattr(
+        staticreports.shutil, "copy", lambda src, dst: ops.append(("copy", str(src), str(dst)))
+    )
+    monkeypatch.setattr(
+        staticreports.Path,
+        "unlink",
+        lambda self, missing_ok=True: None,
+    )
+    monkeypatch.setattr(staticreports.time, "sleep", lambda s: None)
+
+    ops = []
+    repo_target = tmp_path / "fake-repo"
+    monkeypatch.setattr(
+        staticreports,
+        "REPO_URLS",
+        [("https://git.launchpad.net/ubuntu-archive-tools", "main", repo_target)],
+    )
+
+    calls = []
+
+    def flaky_run(cmd, **kwargs):
+        calls.append(cmd)
+        if len(calls) == 1:
+            raise CalledProcessError(128, "git")
+        return Mock()
+
+    monkeypatch.setattr(staticreports, "run", flaky_run)
+    monkeypatch.setattr(staticreports.StaticReports, "_ensure_swap", lambda self: None)
+    monkeypatch.setattr(staticreports.StaticReports, "_install_packages", lambda self: None)
+    monkeypatch.setattr(
+        staticreports.StaticReports, "_configure_unattended_upgrades", lambda self: None
+    )
+    sr = staticreports.StaticReports()
+
+    sr.install()
+
+    assert len(calls) == 2, "second attempt must succeed"
+    assert calls[0] == calls[1]
 
 
 def test_staticreports_init_configures_proxy_environment_from_juju_vars(monkeypatch):
