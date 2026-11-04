@@ -65,10 +65,10 @@ For development and debugging it is recommended to select an individual test fro
 
 ```bash
 ❯ charmcraft.spread -list
-lxd:ubuntu-24.04:tests/spread/integration/deploy-charm:juju_3_6
-lxd:ubuntu-24.04:tests/spread/integration/ingress:juju_3_6
-lxd:ubuntu-24.04:tests/spread/unit/ubuntu-static-reports
-❯ charmcraft.spread -v -debug -reuse lxd:ubuntu-24.04:tests/spread/integration/deploy-charm:juju_3_6
+lxd:ubuntu-26.04:tests/spread/integration/deploy-charm:juju_3_6
+lxd:ubuntu-26.04:tests/spread/integration/ingress:juju_3_6
+lxd:ubuntu-26.04:tests/spread/unit/ubuntu-static-reports
+❯ charmcraft.spread -v -debug -reuse lxd:ubuntu-26.04:tests/spread/integration/deploy-charm:juju_3_6
 ```
 
 ## Build charm

@@ -1,6 +1,6 @@
 summary: Run ubuntu-static-reports python module unit tests
 systems:
-  - ubuntu-24.04
+  - ubuntu-26.04
 
 execute: |
   pushd "$SPREAD_PATH"
