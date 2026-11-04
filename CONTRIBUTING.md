@@ -79,6 +79,115 @@ Build the charm in this git repository using:
 charmcraft pack
 ```
 
+## Workshop staging environment
+
+For debugging the charm in a realistic Juju deployment there is a Workshop
+staging VM. It packs the charm, runs nested LXD/Juju inside the VM and
+deploys the unit with real systemd services to poke at.
+
+```bash
+workshop launch staging        # ~26.04 VM with all tools (takes a while)
+workshop run staging -- lint   # make lint inside the VM
+workshop run staging -- unit   # make unit inside the VM
+workshop run staging -- deploy # pack + juju deploy (see below)
+workshop shell staging         # interactive shell in the VM
+workshop run staging -- ssh    # straight into the charm unit
+```
+
+### Prerequisites (host, once)
+
+- A KVM-capable host with the [Workshop snap](https://documentation.ubuntu.com/canonical-workshop/latest/).
+- VM workshops are experimental and must be enabled:
+
+  ```bash
+  sudo snap set workshop workshop.experimental-vms=1
+  sudo snap restart workshop.workshopd
+  ```
+
+- The repo must be a **regular clone**, not a linked worktree: the charm
+  build runs `git describe` inside the VM, and worktrees confuse it.
+- Store the Launchpad OAuth token in the host keyring (Workshop reads it
+  from there, it never enters the repo or the CLI history):
+
+  ```bash
+  secret-tool store --label='LP OAuth' \
+    service launchpad account lp-ubuntu-archive-unprivileged-bot
+  ```
+
+- Connect the secret after launch (and after each refresh, if `workshop
+  connections staging` shows it disconnected):
+
+  ```bash
+  workshop connect staging/staging:lp-oauth staging/system:lp-oauth
+  ```
+
+  If it is not connected, `deploy` fails fast with these instructions.
+
+### Resize the workshop VM (after every launch)
+
+Until the feature to configure this decalrative, VM size is fixed at launch
+and the default (10G disk, 1G RAM) is too small for the report data.
+From the host, once after `workshop launch staging` (and again
+after `workshop refresh`, which recreates the VM):
+
+```bash
+lxc project list | grep workshop   # -> your project, e.g. workshop.1474078681
+P=workshop.1474078681              # substitute yours below
+lxc --project "$P" list | grep ^staging   # -> VM name, e.g. staging-633d817d
+lxc --project "$P" config device set <VM> root size=60GiB    # allowed while running
+lxc --project "$P" stop <VM>                                   # memory is fixed at boot
+lxc --project "$P" config set <VM> limits.memory=8GiB limits.cpu=4
+lxc --project "$P" start <VM>
+workshop exec staging -- bash -lc 'sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1'
+```
+
+Tip: presetting the memory for all your future workshop VMs avoids the
+stop/start dance: `lxc --project "$P" profile set default limits.memory=8GiB`
+(the root disk size cannot be preset this way - workshop VMs shadow the
+profile's root device, so it stays a per-launch `config device set`).
+```
+
+The root partition does not grow on its own - the final `workshop exec`
+line grows it (`growpart`/`resize2fs`). The disk `size` may also be raised
+later on a running VM (grow the partition again afterwards); the memory
+limit can only be changed while the VM is stopped.
+
+### Deploy
+
+`workshop run staging -- deploy` is always a cold-capable path:
+
+1. preflight free disk/memory in the VM,
+2. bootstrap Juju via concierge on first run,
+3. pack the charm with charmcraft (nested LXD),
+4. `juju deploy` with `--storage staticreports=${STORAGE_SIZE:-50G}`, or
+   `juju refresh` if the application already exists,
+5. create/update/grant the `lp-oauth` Juju secret from the host keyring and
+   set `lpuser_secret_id`,
+6. wait for the unit to settle and print `juju status --relations --storage`.
+
+`workshop refresh` **discards the VM writable filesystem, including the
+nested Juju controller and model** - just re-run `deploy` afterwards.
+`redeploy` removes and re-deploys the application for a fully fresh unit.
+
+### Debugging
+
+```bash
+workshop run staging -- status    # juju status --relations --storage
+workshop run staging -- logs       # juju debug-log (args pass through)
+workshop run staging -- services   # unit timers + failed services
+workshop run staging -- ssh        # shell in the charm unit
+workshop run staging -- destroy    # remove the application
+```
+
+VM workshops support no `tunnel` interface - for web UI access use an SSH
+local forward from the host, e.g.
+`ssh -L 8080:10.x.x.x:80 workshop@$(workshop info staging | awk '/hostname:/{print $2}')`
+with the unit address from `juju status`.
+
+The staging workshop intentionally replaces the old host-side `local-debug`
+runner: it is a real deployment with real systemd services, at the cost of
+being slower than host-side unit tests.
+
 ### Deploy and Debug
 
 ```bash
