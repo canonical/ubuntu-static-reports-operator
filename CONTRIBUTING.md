@@ -125,27 +125,28 @@ workshop run staging -- ssh    # straight into the charm unit
 
 ### Resize the workshop VM (after every launch)
 
-Until the feature to configure this decalrative, VM size is fixed at launch
-and the default (10G disk, 1G RAM) is too small for the report data.
-From the host, once after `workshop launch staging` (and again
+The staging VM mirrors the production machine shape (2 cores, 8G RAM) and
+the report data needs more than the launch default (10G disk, 1G RAM) can
+hold. VM size is fixed at launch and cannot be declared in `workshop.yaml`
+yet, so from the host, once after `workshop launch staging` (and again
 after `workshop refresh`, which recreates the VM):
 
 ```bash
 lxc project list | grep workshop   # -> your project, e.g. workshop.1474078681
 P=workshop.1474078681              # substitute yours below
 lxc --project "$P" list | grep ^staging   # -> VM name, e.g. staging-633d817d
-lxc --project "$P" config device set <VM> root size=60GiB    # allowed while running
+lxc --project "$P" config device set <VM> root size=80GiB    # allowed while running
 lxc --project "$P" stop <VM>                                   # memory is fixed at boot
-lxc --project "$P" config set <VM> limits.memory=8GiB limits.cpu=4
+lxc --project "$P" config set <VM> limits.memory=8GiB limits.cpu=2
 lxc --project "$P" start <VM>
 workshop exec staging -- bash -lc 'sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1'
 ```
 
-Tip: presetting the memory for all your future workshop VMs avoids the
-stop/start dance: `lxc --project "$P" profile set default limits.memory=8GiB`
+Tip: presetting the memory and CPU for all your future workshop VMs avoids
+the stop/start dance:
+`lxc --project "$P" profile set default limits.memory=8GiB limits.cpu=2`
 (the root disk size cannot be preset this way - workshop VMs shadow the
 profile's root device, so it stays a per-launch `config device set`).
-```
 
 The root partition does not grow on its own - the final `workshop exec`
 line grows it (`growpart`/`resize2fs`). The disk `size` may also be raised
@@ -157,13 +158,16 @@ limit can only be changed while the VM is stopped.
 `workshop run staging -- deploy` is always a cold-capable path:
 
 1. preflight free disk/memory in the VM,
-2. bootstrap Juju via concierge on first run,
-3. pack the charm with charmcraft (nested LXD),
-4. `juju deploy` with `--storage staticreports=${STORAGE_SIZE:-50G}`, or
+2. ensure the production-shape 8G swap file (`/swapfile.swp`, same path
+   and size as on the real unit) so report generation hits swap instead of
+   the kernel OOM killer,
+3. bootstrap Juju via concierge on first run,
+4. pack the charm with charmcraft (nested LXD),
+5. `juju deploy` with `--storage staticreports=${STORAGE_SIZE:-50G}`, or
    `juju refresh` if the application already exists,
-5. create/update/grant the `lp-oauth` Juju secret from the host keyring and
+6. create/update/grant the `lp-oauth` Juju secret from the host keyring and
    set `lpuser_secret_id`,
-6. wait for the unit to settle and print `juju status --relations --storage`.
+7. wait for the unit to settle and print `juju status --relations --storage`.
 
 `workshop refresh` **discards the VM writable filesystem, including the
 nested Juju controller and model** - just re-run `deploy` afterwards.

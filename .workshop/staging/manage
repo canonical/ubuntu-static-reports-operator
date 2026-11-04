@@ -46,6 +46,28 @@ Grow the VM root disk from the host (see CONTRIBUTING.md 'Resize the workshop VM
   [ "$mem" -ge $((2 * 1024 * 1024 * 1024)) ] || die "available memory inside the VM below 2G - raise the VM memory from the host (see CONTRIBUTING.md 'Resize the workshop VM')."
 }
 
+ensure_vm_swap() {
+  # Same swapfile path and size as on the production unit (see the charm's
+  # SWAPFILE/SWAP_SIZE): report generation must hit swap here, not the OOM
+  # killer. Fixed 8G, created at deploy time because a fresh VM's default
+  # root disk is too small for it at setup-base time.
+  if swapon --noheadings --show=NAME 2>/dev/null | grep -qx /swapfile.swp; then
+    return 0
+  fi
+  local avail
+  avail="$(df -B1 --output=avail / | tail -1)"
+  if [ "$avail" -lt $((9 * 1024 * 1024 * 1024)) ]; then
+    echo "warning: less than 9G free disk for the 8G swap file - growing skipped, report runs risk OOM kills. Grow the VM root disk (see CONTRIBUTING.md), then re-run." >&2
+    return 0
+  fi
+  sudo fallocate -l 8G /swapfile.swp
+  sudo chmod 600 /swapfile.swp
+  sudo mkswap /swapfile.swp >/dev/null
+  sudo swapon /swapfile.swp
+  grep -qxF "/swapfile.swp none swap sw 0 0" /etc/fstab || echo "/swapfile.swp none swap sw 0 0" | sudo tee -a /etc/fstab >/dev/null
+  echo "activated 8G swap file (survives VM stop/start)"
+}
+
 ensure_juju() {
   if ! juju models >/dev/null 2>&1; then
     echo "bootstrapping Juju via concierge (first run, takes a few minutes)"
@@ -110,6 +132,7 @@ juju_secret() {
 
 deploy() {
   preflight
+  ensure_vm_swap
   ensure_juju
   pack
   if app_exists; then
