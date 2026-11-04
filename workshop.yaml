@@ -19,3 +19,10 @@ actions:
   format: make format
   unit: make unit
   build: sg lxd -c "charmcraft pack --use-lxd $*"
+  deploy: bash /project/.workshop/staging/manage deploy "$@"
+  redeploy: bash /project/.workshop/staging/manage redeploy "$@"
+  status: bash /project/.workshop/staging/manage status "$@"
+  logs: bash /project/.workshop/staging/manage logs "$@"
+  services: bash /project/.workshop/staging/manage services "$@"
+  ssh: bash /project/.workshop/staging/manage ssh "$@"
+  destroy: bash /project/.workshop/staging/manage destroy "$@"

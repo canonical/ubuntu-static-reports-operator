@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# Staging deployment manager - runs inside the workshop VM as the workshop
+# user. Everything is a cold path: after `workshop refresh` the nested Juju
+# controller is gone and `deploy` starts from scratch.
+#
+# Subcommands: deploy, redeploy, status, logs, services, ssh, destroy
+#
+# Tunables (env vars): JUJU_MODEL, STORAGE_SIZE, APP, SECRET_NAME,
+# SECRET_PLUG, SKIP_WAIT (set to skip the post-deploy wait loop).
+set -euo pipefail
+
+APP="${APP:-ubuntu-static-reports}"
+MODEL="${JUJU_MODEL:-staging}"
+STORAGE_SIZE="${STORAGE_SIZE:-50G}"
+SECRET_NAME="${SECRET_NAME:-lp-oauth}"
+SECRET_PLUG="${SECRET_PLUG:-staging.lp-oauth}"
+CHARM_GLOB="ubuntu-static-reports_*.charm"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+usage() {
+  sed -n '2,7p' "$0"
+  exit "${1:-0}"
+}
+
+charm_path() {
+  local charm
+  charm="$(ls -t ~/${CHARM_GLOB} 2>/dev/null | head -1)"
+  [ -n "$charm" ] || die "no charm packed yet - run 'workshop run staging -- build' first (or deploy, which packs)"
+  echo "$charm"
+}
+
+preflight() {
+  # Hard floor for build + controllers + initial data.
+  local avail cap
+  avail="$(df -B1 --output=avail / | tail -1)"
+  [ "$avail" -ge $((15 * 1024 * 1024 * 1024)) ] || die "free disk inside the VM: $((avail / 1024 / 1024 / 1024))G, need at least 15G.
+Grow the VM root disk from the host (see CONTRIBUTING.md 'Resize the workshop VM'), then re-run."
+  # The nested LXD dir backend does not enforce the storage size, it is only
+  # the Juju volume cap - warn when real data could outgrow the disk.
+  cap=$(( $(numfmt --from=iec "$STORAGE_SIZE" 2>/dev/null || echo 0) ))
+  [ "$avail" -ge "$cap" ] || echo "warning: storage cap ${STORAGE_SIZE} exceeds free disk $((avail / 1024 / 1024 / 1024))G - reports may fill the VM root filesystem" >&2
+
+  local mem
+  mem="$(free -b | awk '/^Mem:/{print $7}')"
+  [ "$mem" -ge $((2 * 1024 * 1024 * 1024)) ] || die "available memory inside the VM below 2G - raise the VM memory from the host (see CONTRIBUTING.md 'Resize the workshop VM')."
+}
+
+ensure_juju() {
+  if ! juju models >/dev/null 2>&1; then
+    echo "bootstrapping Juju via concierge (first run, takes a few minutes)"
+    sudo concierge prepare -p machine --extra-snaps astral-uv --extra-debs make
+  fi
+  if ! juju show-model "$MODEL" >/dev/null 2>&1; then
+    juju add-model "$MODEL"
+  fi
+  juju switch "$MODEL" >/dev/null
+}
+
+lp_token() {
+  workshopctl get-secret "$SECRET_PLUG" 2>/dev/null || die "Launchpad OAuth token unavailable from the host keyring.
+
+Store the token in the host keyring:
+  secret-tool store --label='LP OAuth' service launchpad account lp-ubuntu-archive-unprivileged-bot
+
+then connect the secret once:
+  workshop connect staging/staging:lp-oauth staging/system:lp-oauth"
+}
+
+pack() {
+  cd /project
+  sg lxd -c "charmcraft pack --use-lxd"
+  # The juju snap cannot read the /project host mount, hence the copy.
+  cp -f $CHARM_GLOB ~/
+}
+
+app_exists() {
+  juju status "$APP" --format json 2>/dev/null | python3 -c '
+import json, sys
+app = sys.argv[1]
+try:
+    sys.exit(0 if app in json.load(sys.stdin).get("applications", {}) else 1)
+except Exception:
+    sys.exit(1)
+' "$APP"
+}
+
+unit_status() {
+  # ponytail: naive JSON parse of `juju status`, assumes one unit (scale 1).
+  juju status "$APP" --format json 2>/dev/null | python3 -c '
+import json, sys
+app = sys.argv[1]
+try:
+    units = json.load(sys.stdin)["applications"][app]["units"]
+    print(next(iter(units.values()))["workload-status"]["current"])
+except Exception:
+    print("unknown")
+' "$APP" || echo unknown
+}
+
+juju_secret() {
+  local token id
+  token="$(lp_token)"
+  juju add-secret "$SECRET_NAME" "lpoauthkey=${token}" 2>/dev/null \
+    || juju update-secret "$SECRET_NAME" "lpoauthkey=${token}"
+  id="secret:$(juju show-secret "$SECRET_NAME" --format json | python3 -c 'import json, sys; print(next(iter(json.load(sys.stdin))))')"
+  juju grant-secret "$SECRET_NAME" "$APP" 2>/dev/null || true
+  juju config "$APP" "lpuser_secret_id=${id}"
+}
+
+deploy() {
+  preflight
+  ensure_juju
+  pack
+  if app_exists; then
+    echo "application already deployed - refreshing the charm"
+    juju refresh "$APP" --path="$(charm_path)"
+  else
+    juju deploy "$(charm_path)" "$APP" --storage "staticreports=${STORAGE_SIZE}"
+  fi
+  juju_secret
+
+  if [ -z "${SKIP_WAIT:-}" ]; then
+    echo "waiting for the unit to settle (up to 10 min)..."
+    local i status
+    for i in $(seq 1 60); do
+      sleep 10
+      status="$(unit_status)"
+      case "$status" in
+        active | blocked | error) break ;;
+      esac
+    done
+  fi
+
+  juju status --relations --storage
+}
+
+redeploy() {
+  destroy
+  deploy
+}
+
+destroy() {
+  app_exists || { echo "nothing to destroy"; return 0; }
+  juju remove-application "$APP" --no-prompt --force --destroy-storage
+  local i
+  for i in $(seq 1 30); do
+    app_exists || break
+    sleep 5
+  done
+}
+
+status() { exec juju status --relations --storage "$@"; }
+
+logs() { exec juju debug-log --no-tail "$@"; }
+
+unit() {
+  # First unit of the app; the number is not stable across redeploys.
+  juju status "$APP" --format json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    units = json.load(sys.stdin)["applications"][sys.argv[1]]["units"]
+    print(next(iter(units)))
+except Exception:
+    sys.exit(1)
+' "$APP"
+}
+
+services() {
+  juju ssh "$(unit)" -- "systemctl list-timers --no-pager | grep -E 'update-|sru-|package|seeded|permissions' || true; systemctl --failed --no-pager"
+}
+
+ssh() { exec juju ssh "$(unit)" "$@"; }
+
+case "${1:-}" in
+  deploy) shift; deploy "$@" ;;
+  redeploy) shift; redeploy "$@" ;;
+  destroy) shift; destroy "$@" ;;
+  status) shift; status "$@" ;;
+  logs) shift; logs "$@" ;;
+  services) shift; services "$@" ;;
+  ssh) shift; ssh "$@" ;;
+  -h | --help | "") usage ;;
+  *) usage 1 ;;
+esac
