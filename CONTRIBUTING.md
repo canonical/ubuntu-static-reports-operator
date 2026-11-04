@@ -129,7 +129,8 @@ The staging VM mirrors the production machine shape (2 cores, 8G RAM) and
 the report data needs more than the launch default (10G disk, 1G RAM) can
 hold. VM size is fixed at launch and cannot be declared in `workshop.yaml`
 yet, so from the host, once after `workshop launch staging` (and again
-after `workshop refresh`, which recreates the VM):
+after `workshop refresh`, which recreates the VM) [Note: this being declared
+is a feature that is expected to come to workshop, then we can simplify this]:
 
 ```bash
 lxc project list | grep workshop   # -> your project, e.g. workshop.1474078681
