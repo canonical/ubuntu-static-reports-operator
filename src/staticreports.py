@@ -238,18 +238,32 @@ class StaticReports:
 
         An existing swap file is never recreated, resized, or re-formatted;
         it is only activated and persisted in /etc/fstab.
+
+        Best effort only: environments that cannot swap (containers) keep
+        booting without the OOM safety net instead of failing the install.
         """
         if self._swap_is_active():
             logger.info("Swap file %s already active, keeping it as-is", SWAPFILE)
-        else:
-            if SWAPFILE.exists():
-                logger.info("Swap file %s present but inactive, activating it", SWAPFILE)
-            else:
+            self._ensure_fstab_entry()
+            return
+
+        created = not SWAPFILE.exists()
+        try:
+            if created:
                 logger.info("No swap file at %s, creating %s swap", SWAPFILE, SWAP_SIZE)
                 run(["fallocate", "-l", SWAP_SIZE, str(SWAPFILE)], check=True)
                 os.chmod(SWAPFILE, 0o600)
                 run(["mkswap", str(SWAPFILE)], check=True)
+            else:
+                logger.info("Swap file %s present but inactive, activating it", SWAPFILE)
             run(["swapon", str(SWAPFILE)], check=True)
+        except (CalledProcessError, SubprocessError) as e:
+            if created:
+                SWAPFILE.unlink(missing_ok=True)
+            logger.warning(
+                "Swap setup failed (expected in containers), continuing without it: %s", e
+            )
+            return
 
         self._ensure_fstab_entry()
 

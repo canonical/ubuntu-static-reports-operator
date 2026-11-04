@@ -967,17 +967,23 @@ def test_ensure_swap_creates_missing_swapfile(monkeypatch, tmp_path):
     assert fstab_path.read_text() == staticreports.SWAP_FSTAB_ENTRY + "\n"
 
 
-@pytest.mark.parametrize("failing_step", ["fallocate", "mkswap"])
-def test_ensure_swap_raises_when_creation_fails(monkeypatch, tmp_path, failing_step):
-    """Any failure while creating the swap file raises and skips the fstab entry."""
+@pytest.mark.parametrize("failing_step", ["fallocate", "mkswap", "swapon"])
+def test_ensure_swap_tolerates_creation_and_activation_failures(
+    monkeypatch, tmp_path, failing_step
+):
+    """Swap is best effort: failures warn instead of failing the install.
+
+    A newly created swapfile is removed again so no dead 8G file is left
+    behind; the fstab entry is only written when swap actually activates.
+    """
     sr, fstab_path, commands, chmods = _setup_ensure_swap(
         monkeypatch, tmp_path, swapfile_exists=False, active=False, failures={failing_step: 1}
     )
 
-    with pytest.raises(CalledProcessError):
-        sr._ensure_swap()
+    sr._ensure_swap()
 
     assert fstab_path.read_text() == ""
+    assert not staticreports.SWAPFILE.exists()
 
 
 def test_ensure_swap_activates_existing_inactive_swapfile_without_touching_it(
@@ -995,16 +1001,19 @@ def test_ensure_swap_activates_existing_inactive_swapfile_without_touching_it(
     assert fstab_path.read_text() == staticreports.SWAP_FSTAB_ENTRY + "\n"
 
 
-def test_ensure_swap_raises_when_activating_existing_file_fails(monkeypatch, tmp_path):
-    """A failing swapon on an existing file raises; it is never re-formatted."""
+def test_ensure_swap_tolerates_activation_failure_on_existing_file(monkeypatch, tmp_path):
+    """A failing swapon (e.g. inside a container) keeps the existing file as-is.
+
+    The fstab entry is skipped and the call must not raise.
+    """
     sr, fstab_path, commands, chmods = _setup_ensure_swap(
         monkeypatch, tmp_path, swapfile_exists=True, active=False, failures={"swapon": 1}
     )
 
-    with pytest.raises(CalledProcessError):
-        sr._ensure_swap()
+    sr._ensure_swap()
 
     assert [cmd[0] for cmd in commands] == ["swapon"]
+    assert staticreports.SWAPFILE.exists()
     assert fstab_path.read_text() == ""
 
 
