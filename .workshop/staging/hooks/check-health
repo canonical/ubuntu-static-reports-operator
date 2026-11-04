@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Health check, runs at launch/refresh after setup-project.
+# Juju itself is installed on first `deploy`, so it is not required here.
+set -euo pipefail
+
+VENV=/home/workshop/.venvs/ubuntu-static-reports
+
+fail() {
+  workshopctl set-health --code="$1" error "$2" || true
+  exit 1
+}
+
+for tool in uv make charmcraft lxc; do
+  command -v "$tool" >/dev/null || fail "missing-$tool" "required tool $tool is missing"
+done
+
+if [ ! -x "$VENV/bin/python" ]; then
+  fail "missing-venv" "project venv is missing - setup-project did not run"
+fi
+"$VENV/bin/python" -c "import ops" || fail "broken-venv" "venv exists but importing ops failed"
+
+workshopctl set-health okay

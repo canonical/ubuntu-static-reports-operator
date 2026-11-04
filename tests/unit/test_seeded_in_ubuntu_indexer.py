@@ -28,6 +28,13 @@ def indexer():
     return _load_indexer()
 
 
+def test_default_archive_root_uses_srv(indexer, monkeypatch):
+    monkeypatch.delenv("ARCHIVE_ROOT", raising=False)
+    monkeypatch.delenv("MIRROR_DIR", raising=False)
+    args = indexer.parse_args([])
+    assert args.archive_root == Path("/srv/staticreports/germinate/current")
+
+
 def _tree_file(
     flavours: Path, flavour: str, series: str, arch: str, seed: str, packages: list[str]
 ) -> Path:

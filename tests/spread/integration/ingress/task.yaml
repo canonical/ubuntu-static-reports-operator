@@ -1,6 +1,6 @@
 summary: Test integration between ubuntu-static-reports and haproxy
 systems:
-  - ubuntu-24.04
+  - ubuntu-26.04
 
 execute: |
   pushd "$SPREAD_PATH"

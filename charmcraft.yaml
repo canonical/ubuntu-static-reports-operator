@@ -17,7 +17,7 @@ links:
   source:
     - https://github.com/canonical/ubuntu-static-reports-operator
 
-base: ubuntu@24.04
+base: ubuntu@26.04
 platforms:
   amd64:
 

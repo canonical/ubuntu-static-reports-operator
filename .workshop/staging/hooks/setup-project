@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# User-side setup, runs as the workshop user in /project after the project
+# directory is mounted. No build, no deploy.
+set -euo pipefail
+# Outside /project: a host-built .venv on the mount must not leak in.
+export UV_PROJECT_ENVIRONMENT=/home/workshop/.venvs/ubuntu-static-reports
+mkdir -p "$UV_PROJECT_ENVIRONMENT"
+cd /project
+uv sync --all-extras --locked

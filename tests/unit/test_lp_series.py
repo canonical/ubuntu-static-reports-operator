@@ -160,6 +160,31 @@ def test_update_seeds_series_from_keeps_release_order(monkeypatch):
     assert seeds._series_from("jammy", ["focal", "jammy", "noble"]) == ["jammy", "noble"]
 
 
+def test_update_seeds_continues_after_checkout_failure(monkeypatch, tmp_path):
+    seeds = _load_script("update-seeds")
+    monkeypatch.setattr(lp_series, "active_series", lambda: ["noble", "jammy"])
+    monkeypatch.setattr(lp_series, "all_series", lambda: ["noble", "jammy"])
+    attempted = []
+
+    def fake_update(flavour, series, team, workdir, max_attempts, initial_delay):
+        attempted.append((flavour, series))
+        if (flavour, series) == ("bad", "noble"):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(seeds, "update_seed_checkout", fake_update)
+
+    flavors = {"bad": ("team", "jammy"), "good": ("team", "jammy")}
+    with pytest.raises(RuntimeError, match="Failed to update 1 seed checkout"):
+        seeds.update_seeds(flavors, tmp_path, 1, 0, None)
+
+    assert attempted == [
+        ("bad", "noble"),
+        ("bad", "jammy"),
+        ("good", "noble"),
+        ("good", "jammy"),
+    ]
+
+
 def test_update_mismatches_detect_devel(monkeypatch):
     mismatches = _load_script("update-mismatches")
     monkeypatch.setattr(lp_series, "devel_series", lambda: "stonking")
@@ -182,12 +207,37 @@ def test_germinate_ubuntu_proposed_germinates_launchpad_devel(monkeypatch, tmp_p
     for module in ("", ".archive", ".germinator", ".log", ".seeds"):
         monkeypatch.setitem(sys.modules, f"germinate{module}", MagicMock())
     germinate = _load_script("germinate-ubuntu")
-    suites = []
+    calls = []
     monkeypatch.setattr(lp_series, "devel_series", lambda: "stonking")
-    monkeypatch.setattr(germinate, "germinate_suite", lambda suite, *_, **__: suites.append(suite))
+
+    def record_germinate(suite, *_, **kwargs):
+        calls.append((suite, kwargs.get("ogre_suites")))
+
+    monkeypatch.setattr(germinate, "germinate_suite", record_germinate)
 
     assert germinate.main(["--pocket", "proposed", "-o", str(tmp_path)]) == 0
-    assert suites == ["stonking-proposed"]
+    expected_ogre = ["stonking", "stonking-security", "stonking-updates", "stonking-proposed"]
+    assert calls == [("stonking-proposed", expected_ogre)]
+
+
+def test_germinate_ubuntu_continues_after_series_failure(monkeypatch, tmp_path):
+    # germinate is apt-only on the unit, absent from the dev venv
+    for module in ("", ".archive", ".germinator", ".log", ".seeds"):
+        monkeypatch.setitem(sys.modules, f"germinate{module}", MagicMock())
+    germinate = _load_script("germinate-ubuntu")
+    attempted = []
+
+    monkeypatch.setattr(germinate, "_series_from_archive", lambda _: ["first", "second"])
+
+    def fail_first(suite, *_, **__):
+        attempted.append(suite)
+        if suite == "first":
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(germinate, "germinate_suite", fail_first)
+
+    assert germinate.main(["-o", str(tmp_path)]) == 1
+    assert attempted == ["first", "second"]
 
 
 def test_archive_mirror_series_filters_are_a_whitelist(monkeypatch):

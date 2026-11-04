@@ -1,0 +1,10 @@
+name: staging
+version: "0.1"
+summary: Staging deployment and debug tooling for the charm
+description: |
+  Project SDK for the staging workshop: installs nested LXD, charmcraft,
+  concierge/juju and the manage script that deploys and debugs the charm
+  in a realistic Juju model inside the workshop VM.
+plugs:
+  lp-oauth:
+    interface: secret

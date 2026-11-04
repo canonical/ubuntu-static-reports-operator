@@ -150,7 +150,7 @@ Unit          Workload  Agent  Machine  Public address  Ports  Message
 ubuntu-static-reports/0*  active    idle    1       10.142.46.109
 
 Machine  State    Address        Inst id         Base          AZ  Message
-1        started  10.142.46.109  juju-fd4fe1-1   ubuntu@24.04      Running
+1        started  10.142.46.109  juju-fd4fe1-1   ubuntu@26.04      Running
 ```
 
 On first start up, the charm will install the application and install a systemd timer unit to trigger tracker updates on a regular basis.

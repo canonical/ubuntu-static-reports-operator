@@ -39,7 +39,7 @@ backends:
       lxc delete -f $instance_name
 
     systems:
-      - ubuntu-24.04:
+      - ubuntu-26.04:
           username: spread
           workers: 1
 
