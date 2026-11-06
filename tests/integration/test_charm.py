@@ -1,47 +1,39 @@
 # Copyright 2025 Canonical
 # See LICENSE file for licensing details.
 
-import logging
 import os
-import time
 
 import jubilant
 import pytest
 import requests
 
-from . import APPNAME, address, retry, wait_oneshot_finished
-
-requires_secret = pytest.mark.skipif(
-    os.environ.get("LPUSER_OAUTH_FILE") is None,
-    reason="LPUSER_OAUTH_FILE not set - secret-dependent tests skipped",
+from . import (
+    APPNAME,
+    address,
+    configure_lp_secret,
+    requires_archive,
+    requires_secret,
+    retry,
+    wait_oneshot_finished,
 )
-
-requires_archive = pytest.mark.skipif(
-    os.environ.get("MISMATCH_ARCHIVE_RSYNC_SOURCE") is None,
-    reason="MISMATCH_ARCHIVE_RSYNC_SOURCE not set - archive-dependent mismatch test skipped",
-)
-
-
-def deploy_wait_func(status):
-    """Wait on juju status until deployed and started."""
-    all_maint = jubilant.all_maintenance(status)
-    started = status.apps[APPNAME].app_status.message == "Starting Static Reports"
-    ready = all_maint and started
-    logging.debug(f"all_maint: {all_maint}")
-    logging.debug(f"started: {started}")
-    return ready
 
 
 def test_service_state_after_deploy(
     juju: jubilant.Juju, ubuntu_static_reports_charm, lpuser_secret
 ):
     """Deploy the charm via jubilant and wait until it fully completed."""
-    juju.deploy(ubuntu_static_reports_charm, app=APPNAME)
+    juju.deploy(
+        ubuntu_static_reports_charm,
+        app=APPNAME,
+        # Keep the hourly archive-mirror sync - and the ~13G germinate
+        # snapshot churn its OnSuccess= triggers - out of the test VM.
+        # The mismatch test overrides this with a real source when
+        # MISMATCH_ARCHIVE_RSYNC_SOURCE is set.
+        config={"rsync_archive_source": "rsync://127.0.0.1/integration-tests"},
+    )
+    configure_lp_secret(juju, lpuser_secret)
 
-    if lpuser_secret:
-        juju.config(APPNAME, {"lpuser_secret_id": lpuser_secret})
-
-    juju.wait(deploy_wait_func, timeout=1200)
+    juju.wait(jubilant.all_active, timeout=1200)
     wait_oneshot_finished(
         juju, unit="ubuntu-static-reports/0", service="update-sync-blocklist.service"
     )
@@ -120,13 +112,17 @@ def test_sru_report_logs_progress_in_debug_mode(juju: jubilant.Juju):
         assert not file_test(f"-e {report_new}")
 
         juju.ssh(unit, "sudo systemctl start --no-block sru-report.service")
-        time.sleep(15)
 
-        journal = juju.ssh(unit, "sudo journalctl -u sru-report.service --no-pager")
-        assert "Initializing LP Credentials" in journal
+        @retry(retry_num=6, retry_sleep_sec=10)
+        def progress_started():
+            journal = juju.ssh(unit, "sudo journalctl -u sru-report.service --no-pager")
+            assert "Initializing LP Credentials" in journal, (
+                f"sru-report did not start querying Launchpad yet, journal:\n{journal}"
+            )
+            assert file_test(f"-e {report_new}")
+            assert not file_test(f"-s {report_new}")
 
-        assert file_test(f"-e {report_new}")
-        assert not file_test(f"-s {report_new}")
+        progress_started()
     finally:
         juju.ssh(
             unit,
@@ -138,29 +134,43 @@ def test_sru_report_logs_progress_in_debug_mode(juju: jubilant.Juju):
 
 @requires_secret
 def test_content_permissions_report(juju: jubilant.Juju):
-    """Check the response of permissions-report."""
+    """Check the response of permissions-report.
+
+    The tool writes plain permission listings (=== user === sections
+    with " - package" entries), one file per permission source.
+    """
     wait_oneshot_finished(
         juju, unit="ubuntu-static-reports/0", service="permissions-report.service"
     )
     check_content(
         juju,
-        path="output/permissions-report.html",
-        startswith="<!DOCTYPE html>",
-        contains="Permission Report",
+        path="archive-permissions/teams",
+        startswith="=== ",
+        contains=" - ",
     )
 
 
 @requires_secret
 def test_content_packageset_report(juju: jubilant.Juju):
-    """Check the response of packageset-report."""
+    """Check the response of packageset-report.
+
+    The tool writes one file per series and package set, ending with a
+    'Generated at:' stamp; the file name is discovered from the unit.
+    """
     wait_oneshot_finished(
         juju, unit="ubuntu-static-reports/0", service="packageset-report.service"
     )
+    pkgset = juju.ssh(
+        "ubuntu-static-reports/0",
+        "ls /srv/staticreports/www/packagesets/noble/ | head -1",
+    ).strip()
+    assert pkgset, "no packageset files produced"
+
     check_content(
         juju,
-        path="output/packageset-report.html",
-        startswith="<!DOCTYPE html>",
-        contains="Packageset Report",
+        path=f"packagesets/noble/{pkgset}",
+        startswith="Name: ",
+        contains="Generated at:",
     )
 
 
@@ -192,11 +202,20 @@ def test_onsuccess_services_are_enabled(juju: jubilant.Juju):
 
 
 def test_swapfile_is_active_and_persistent(juju: jubilant.Juju):
-    """The charm-ensured swap file is active and referenced in /etc/fstab."""
-    swaps = juju.ssh("ubuntu-static-reports/0", "cat /proc/swaps")
+    """The charm-ensured swap file is active and referenced in /etc/fstab.
+
+    Skipped in containers: swapon is impossible there and the charm
+    deliberately continues without the swap safety net.
+    """
+    unit = "ubuntu-static-reports/0"
+    virt = juju.ssh(unit, "systemd-detect-virt --container || true").strip()
+    if virt != "none":
+        pytest.skip(f"unit runs in a container ({virt}) - swap is not possible")
+
+    swaps = juju.ssh(unit, "cat /proc/swaps")
     assert "/swapfile.swp" in swaps, f"/swapfile.swp not active in /proc/swaps: {swaps}"
 
-    fstab = juju.ssh("ubuntu-static-reports/0", "cat /etc/fstab")
+    fstab = juju.ssh(unit, "cat /etc/fstab")
     assert "/swapfile.swp" in fstab, f"/swapfile.swp not present in /etc/fstab: {fstab}"
 
 

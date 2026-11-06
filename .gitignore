@@ -3,5 +3,4 @@
 __pycache__/
 *.charm
 src/secret
-.spread-reuse.*
 .workshop.lock

@@ -1,5 +1,6 @@
 name: staging
-base: ubuntu@26.04
+# match the charm base, see charmcraft.yaml
+base: ubuntu@24.04
 runtime: lxd-vm
 sdks:
   - name: uv
@@ -18,6 +19,7 @@ actions:
   lint: make lint
   format: make format
   unit: make unit
+  integration: bash /project/.workshop/staging/manage integration "$@"
   build: sg lxd -c "charmcraft pack --use-lxd $*"
   deploy: bash /project/.workshop/staging/manage deploy "$@"
   redeploy: bash /project/.workshop/staging/manage redeploy "$@"

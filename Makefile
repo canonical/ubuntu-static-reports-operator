@@ -46,10 +46,7 @@ unit:
 	uv run --all-extras coverage report
 
 integration:
-	charmcraft.spread -v
-
-integration-debug:
-	charmcraft.spread -v -debug
+	workshop run staging -- integration $(ARGS)
 
 integration-execution:
 	uv run --all-extras \

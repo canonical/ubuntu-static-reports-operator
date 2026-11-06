@@ -17,7 +17,11 @@ links:
   source:
     - https://github.com/canonical/ubuntu-static-reports-operator
 
-base: ubuntu@26.04
+# Pinned to 24.04: the production deployment's subordinate charms are not
+# available on 26.04 yet. Re-check before reconsidering a bump:
+# https://chat.canonical.com/canonical/pl/d69bw7mswiyrx89spuweyrejdr
+# https://discourse.canonical.com/t/list-of-subordinates-charms-not-available-on-ubuntu-26-04/7627
+base: ubuntu@24.04
 platforms:
   amd64:
 

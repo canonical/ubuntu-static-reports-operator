@@ -1,30 +1,34 @@
 # Copyright 2025 Canonical
 # See LICENSE file for licensing details.
 
-import logging
 
 import jubilant
 from requests import Session
 
-from . import APPNAME, HAPROXY, SSC, DNSResolverHTTPSAdapter, address, retry, wait_oneshot_finished
+from . import (
+    APPNAME,
+    HAPROXY,
+    SSC,
+    DNSResolverHTTPSAdapter,
+    address,
+    configure_lp_secret,
+    requires_secret,
+    retry,
+    wait_oneshot_finished,
+)
 
 
-def deploy_ha_wait_func(status):
-    """Wait on juju status until deployed and started."""
-    app_maintenance = status.apps[APPNAME].is_maintenance
-    started = status.apps[APPNAME].app_status.message == "Starting Static Reports"
-    haproxy_active = status.apps[HAPROXY].is_active
-    ssc_active = status.apps[SSC].is_active
-    logging.debug(f"app_maintenance: {app_maintenance}")
-    logging.debug(f"started: {started}")
-    logging.debug(f"haproxy_active: {haproxy_active}")
-    logging.debug(f"ssc_active: {ssc_active}")
-    return app_maintenance and started and haproxy_active and ssc_active
-
-
-def test_service_state_after_ha_deploy(juju: jubilant.Juju, ubuntu_static_reports_charm):
+def test_service_state_after_ha_deploy(
+    juju: jubilant.Juju, ubuntu_static_reports_charm, lpuser_secret
+):
     """Deploy the charm along haproxy and wait until it fully completed."""
-    juju.deploy(ubuntu_static_reports_charm, app=APPNAME)
+    juju.deploy(
+        ubuntu_static_reports_charm,
+        app=APPNAME,
+        # Keep the hourly archive-mirror sync - and the ~13G germinate
+        # snapshot churn its OnSuccess= triggers - out of the test VM.
+        config={"rsync_archive_source": "rsync://127.0.0.1/integration-tests"},
+    )
     juju.deploy(
         HAPROXY, channel="2.8/edge", config={"external-hostname": "ubuntu-static-reports.internal"}
     )
@@ -33,7 +37,9 @@ def test_service_state_after_ha_deploy(juju: jubilant.Juju, ubuntu_static_report
     juju.integrate(APPNAME, HAPROXY)
     juju.integrate(f"{HAPROXY}:certificates", f"{SSC}:certificates")
 
-    juju.wait(deploy_ha_wait_func, timeout=3600)
+    configure_lp_secret(juju, lpuser_secret)
+
+    juju.wait(jubilant.all_active, timeout=3600)
     wait_oneshot_finished(
         juju, unit="ubuntu-static-reports/0", service="update-sync-blocklist.service"
     )
@@ -92,27 +98,49 @@ def test_content_package_subscribers(juju: jubilant.Juju):
     """Check the response of package-subscribers."""
     check_content(
         juju,
-        path="TODO-web-path",
-        startswith="TODO content at the beginning",
-        contains="TODO-something-later",
+        path="package-team-mapping.json",
+        startswith="{",
+        contains="ubuntu-server",
     )
 
 
+@requires_secret
 def test_content_permissions_report(juju: jubilant.Juju):
-    """Check the response of permissions-report."""
+    """Check the response of permissions-report through haproxy.
+
+    The tool writes plain permission listings (=== user === sections
+    with " - package" entries), one file per permission source.
+    """
+    wait_oneshot_finished(
+        juju, unit="ubuntu-static-reports/0", service="permissions-report.service"
+    )
     check_content(
         juju,
-        path="TODO-web-path",
-        startswith="TODO content at the beginning",
-        contains="TODO-something-later",
+        path="archive-permissions/teams",
+        startswith="=== ",
+        contains=" - ",
     )
 
 
+@requires_secret
 def test_content_packageset_report(juju: jubilant.Juju):
-    """Check the response of packageset-report."""
+    """Check the response of packageset-report through haproxy.
+
+    The tool writes one file per series and package set, ending with a
+    'Generated at:' stamp; the file name is discovered from the unit.
+    """
+    wait_oneshot_finished(
+        juju, unit="ubuntu-static-reports/0", service="packageset-report.service"
+    )
+    pkgset = juju.ssh(
+        "ubuntu-static-reports/0",
+        "ls /srv/staticreports/www/packagesets/noble/ | head -1",
+    ).strip()
+    assert pkgset, "no packageset files produced"
+
     check_content(
         juju,
-        path="TODO-web-path",
-        startswith="TODO content at the beginning",
-        contains="TODO-something-later",
+        path=f"packagesets/noble/{pkgset}",
+        startswith="Name: ",
+        contains="Generated at:",
     )

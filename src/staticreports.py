@@ -26,6 +26,7 @@ PACKAGES = [
     "nginx-light",
     "procmail",
     "python3-apt",
+    "python3-debian",
     "python3-keyring",
     "python3-launchpadlib",
     "python3-yaml",

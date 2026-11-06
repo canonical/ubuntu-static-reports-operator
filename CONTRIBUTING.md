@@ -47,29 +47,19 @@ Unit tests can be run locally with no additional tools by running `make unit`. A
 
 ### Integration tests
 
-Integration tests can be run directly with `make integration`, but this requires a rather invasive juju setup and will create and destroy units. This can be useful to run in an already established virtual environment or in CI.
+Integration tests run inside the workshop staging VM (see [Workshop staging environment](#workshop-staging-environment) below) against a temporary Juju model:
 
 ```bash
-❯ make integration
+❯ make integration     # or: workshop run staging -- integration
 ```
 
-### Spread tests
-
-If instead integration tests shall be run with isolation, [Spread](https://github.com/canonical/spread/blob/master/README.md) is configured to create the necessary environment, setup the components needed, and then run the integration tests in there.
+The harness bootstraps Juju if needed, removes leftover state first (the staging app and any leaked test models) so runs do not accumulate it, packs the charm, and runs the pytest suite in a fresh temp model that is destroyed on exit. To focus on single tests during debugging:
 
 ```bash
-❯ charmcraft.spread -v -debug -reuse
+❯ make integration ARGS="-k test_content_sync_blocklist"
 ```
 
-For development and debugging it is recommended to select an individual test from the list of tests, and run it with [`-reuse` for faster setup](https://github.com/canonical/spread/blob/master/README.md#reuse) and [`-debug`](https://github.com/canonical/spread/blob/master/README.md#reuse) to drop into a shell after an error.
-
-```bash
-❯ charmcraft.spread -list
-lxd:ubuntu-26.04:tests/spread/integration/deploy-charm:juju_3_6
-lxd:ubuntu-26.04:tests/spread/integration/ingress:juju_3_6
-lxd:ubuntu-26.04:tests/spread/unit/ubuntu-static-reports
-❯ charmcraft.spread -v -debug -reuse lxd:ubuntu-26.04:tests/spread/integration/deploy-charm:juju_3_6
-```
+`make integration-execution` runs the same pytest suite directly against any controller you already have; it packs the charm itself when no `--charm-path` is given and reads `LPUSER_OAUTH_FILE` for the secret-dependent tests.
 
 ## Build charm
 
@@ -86,7 +76,7 @@ staging VM. It packs the charm, runs nested LXD/Juju inside the VM and
 deploys the unit with real systemd services to poke at.
 
 ```bash
-workshop launch staging        # ~26.04 VM with all tools (takes a while)
+workshop launch staging        # ~24.04 VM with all tools (takes a while)
 workshop run staging -- lint   # make lint inside the VM
 workshop run staging -- unit   # make unit inside the VM
 workshop run staging -- deploy # pack + juju deploy (see below)
@@ -107,11 +97,21 @@ workshop run staging -- ssh    # straight into the charm unit
 - The repo must be a **regular clone**, not a linked worktree: the charm
   build runs `git describe` inside the VM, and worktrees confuse it.
 - Store the Launchpad OAuth token in the host keyring (Workshop reads it
-  from there, it never enters the repo or the CLI history):
+  from there, it never enters the repo or the CLI history). `secret-tool
+  store` reads the secret value from **stdin**, so redirect the OAuth file
+  into it - the password prompt is gnome-keyring asking to unlock/create
+  your login keyring, not the secret itself:
 
   ```bash
   secret-tool store --label='LP OAuth' \
-    service launchpad account lp-ubuntu-archive-unprivileged-bot
+    service launchpad account lp-ubuntu-archive-unprivileged-bot \
+    < /path/to/lp-ubuntu-archive-unprivileged-bot.oauth
+  ```
+
+  Verify from the same (unlocked) session, it must print the file content:
+
+  ```bash
+  secret-tool lookup service launchpad account lp-ubuntu-archive-unprivileged-bot
   ```
 
 - Connect the secret after launch (and after each refresh, if `workshop
@@ -221,16 +221,21 @@ secret:<someuuid>
 
 ## Integration Testing
 
-Integration tests run in an isolated LXD VM managed by spread:
+Integration tests run in the workshop staging VM:
 
 ```bash
 make integration
 ```
 
 This will:
-1. Use `charmcraft spread` to create an LXD VM
-2. Install juju via concierge inside the VM
-3. Deploy the charm and run pytest integration tests
+1. Bootstrap Juju via concierge inside the VM if needed (e.g. after `workshop refresh`)
+2. Remove the staging app and any leaked test models so runs do not accumulate state
+3. Pack the charm and deploy it in a fresh temporary model
+4. Run the pytest integration tests, destroying the model afterwards
+
+If the VM has accumulated state that the automatic cleanup cannot reach, the
+nuclear reset is `workshop refresh` (discards the whole VM writable
+filesystem), then redo the resize steps above and re-run `make integration`.
 
 ### Testing with Secrets
 
@@ -238,16 +243,6 @@ Some services require Launchpad OAuth credentials:
 - `permissions-report.service`
 - `packageset-report.service`
 
-To test these services:
+The token is taken from the host keyring (see [Workshop staging environment](#workshop-staging-environment) above, the secret is shared with the `deploy` flow) and handed to the tests as `LPUSER_OAUTH_FILE`.
 
-1. Obtain OAuth credentials file (see "Deploying" section above)
-2. Export the file path on your host:
-   ```bash
-   export LPUSER_OAUTH_FILE=/path/to/lp-ubuntu-archive-unprivileged-bot.oauth
-   make integration
-   ```
-
-The file will be securely copied into the spread VM, then configured as a Juju secret.
-Tests requiring secrets will automatically skip if `LPUSER_OAUTH_FILE` is not set.
-
-**Note**: Never commit the OAuth file to the repository.
+Tests requiring secrets will automatically skip if the token is unavailable.

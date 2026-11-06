@@ -42,7 +42,7 @@ from various sources depending on the respective service.
 * permissions-report
   * TL;DR: Convert LP API data into a report about package upload ACLs
   * Timing: every 6 hours
-  * Execution time: ~30 minutes (2h timeout)
+  * Execution time: ~10 minutes (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Per Package ACLs stored in Launchpad
   * Old location: https://ubuntu-archive-team.ubuntu.com/archive-permissions/
@@ -51,7 +51,7 @@ from various sources depending on the respective service.
 * packageset-report
   * TL;DR: Convert LP API data into a report about package sets as used for upload permissions
   * Timing: every 6 hours
-  * Execution time: ~30 minutes (2h timeout)
+  * Execution time: ~10 minutes (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Package Set information stored in Launchpad
   * Old location: https://ubuntu-archive-team.ubuntu.com/packagesets/
@@ -150,7 +150,7 @@ Unit          Workload  Agent  Machine  Public address  Ports  Message
 ubuntu-static-reports/0*  active    idle    1       10.142.46.109
 
 Machine  State    Address        Inst id         Base          AZ  Message
-1        started  10.142.46.109  juju-fd4fe1-1   ubuntu@26.04      Running
+1        started  10.142.46.109  juju-fd4fe1-1   ubuntu@24.04      Running
 ```
 
 On first start up, the charm will install the application and install a systemd timer unit to trigger tracker updates on a regular basis.

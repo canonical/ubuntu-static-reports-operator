@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
                     outdir,
                     seed_bases,
                     germinate_logger,
-                    ogre_suites=ogre_suites(suite),
+                    ogre_suites=ogre_suites(suite if pocket == "proposed" else series),
                     pocket=pocket,
                 )
             except Exception as e:
@@ -402,13 +402,19 @@ def germinate_suite(
             procs.append((pid, os.fdopen(rfd, "rb")))
 
     seed_outputs: set[str] = set()
+    failed_pid: int | None = None
     for pid, reader in procs:
         log_records, arch_seed_outputs = pickle.load(reader)
         for rec in log_records:
             germinate_logger.handle(pickle.loads(rec))
         seed_outputs |= arch_seed_outputs
         reader.close()
-        os.waitpid(pid, 0)
+        _, status = os.waitpid(pid, 0)
+        if os.waitstatus_to_exitcode(status) != 0 and failed_pid is None:
+            failed_pid = pid
+
+    if failed_pid is not None:
+        raise RuntimeError(f"germinate child process {failed_pid} failed")
 
     for output in Path(outdir).glob(f"*/{series}/{pocket}/*"):
         if output.name not in seed_outputs:
