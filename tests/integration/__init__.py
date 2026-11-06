@@ -2,16 +2,27 @@
 # See LICENSE file for licensing details.
 import functools
 import logging
-import sys
+import os
 import time
 from urllib.parse import urlparse
 
 import jubilant
+import pytest
 from requests.adapters import DEFAULT_POOLBLOCK, DEFAULT_POOLSIZE, DEFAULT_RETRIES, HTTPAdapter
 
 APPNAME = "ubuntu-static-reports"
 HAPROXY = "haproxy"
 SSC = "self-signed-certificates"
+
+requires_secret = pytest.mark.skipif(
+    os.environ.get("LPUSER_OAUTH_FILE") is None,
+    reason="LPUSER_OAUTH_FILE not set - secret-dependent tests skipped",
+)
+
+requires_archive = pytest.mark.skipif(
+    os.environ.get("MISMATCH_ARCHIVE_RSYNC_SOURCE") is None,
+    reason="MISMATCH_ARCHIVE_RSYNC_SOURCE not set - archive-dependent mismatch test skipped",
+)
 
 
 def retry(retry_num, retry_sleep_sec):
@@ -97,11 +108,36 @@ def address(juju: jubilant.Juju, app: str = APPNAME):
     return juju.status().apps[app].units[f"{app}/0"].public_address
 
 
-@retry(retry_num=80, retry_sleep_sec=120)
-def wait_oneshot_finished(juju: jubilant.Juju, unit: str, service: str):
-    """Wait on service to complete after it has started."""
-    state = juju.ssh(unit, "systemctl show -p ActiveState -p SubState --value " + service)
-    ready = state == "inactive\ndead\n"
-    logging.debug(f"{sys._getframe().f_code.co_name} - state: {state}")
-    logging.debug(f"{sys._getframe().f_code.co_name} - ready: {ready}")
-    assert ready, f"State is {state}, expected finish is 'inactive\ndead\n'"
+def configure_lp_secret(juju: jubilant.Juju, secret_uri):
+    """Grant the LP secret to the deployed app and point the config at it.
+
+    Must run after juju.deploy(): Juju cannot grant a secret to an
+    application that does not exist yet.
+    """
+    if secret_uri:
+        juju.grant_secret(secret_uri, APPNAME)
+        juju.config(APPNAME, {"lpuser_secret_id": secret_uri})
+
+
+def wait_oneshot_finished(
+    juju: jubilant.Juju, unit: str, service: str, retries: int = 80, sleep_sec: int = 120
+):
+    """Wait on service to complete after it has started.
+
+    A failed service is restarted up to two times: its own timer retries
+    only after hours, which no test budget can wait out.
+    """
+    restarts = 0
+    state = ""
+    for _ in range(retries):
+        state = juju.ssh(unit, "systemctl show -p ActiveState -p SubState --value " + service)
+        if state == "inactive\ndead\n":
+            return
+        if "failed" in state and restarts < 2:
+            restarts += 1
+            logging.warning("%s failed, restarting it (attempt %d)", service, restarts)
+            juju.ssh(unit, f"sudo systemctl start --no-block {service}")
+        time.sleep(sleep_sec)
+    raise AssertionError(
+        f"{service} did not finish within {retries * sleep_sec}s, state: {state!r}"
+    )
