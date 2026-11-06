@@ -24,7 +24,7 @@ def lpuser_secret(juju):
     application that does not exist yet.
     """
     oauth_file = os.environ.get("LPUSER_OAUTH_FILE")
-    if not oauth_file or not Path(oauth_file).exists():
+    if not oauth_file or not Path(oauth_file).is_file():
         return None
 
     with open(oauth_file) as f:

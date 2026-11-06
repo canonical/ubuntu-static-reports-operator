@@ -15,8 +15,8 @@ HAPROXY = "haproxy"
 SSC = "self-signed-certificates"
 
 requires_secret = pytest.mark.skipif(
-    os.environ.get("LPUSER_OAUTH_FILE") is None,
-    reason="LPUSER_OAUTH_FILE not set - secret-dependent tests skipped",
+    not os.path.isfile(os.environ.get("LPUSER_OAUTH_FILE", "")),
+    reason="LPUSER_OAUTH_FILE not set or not a file - secret-dependent tests skipped",
 )
 
 requires_archive = pytest.mark.skipif(
