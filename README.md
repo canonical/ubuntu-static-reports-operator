@@ -42,7 +42,7 @@ from various sources depending on the respective service.
 * permissions-report
   * TL;DR: Convert LP API data into a report about package upload ACLs
   * Timing: every 6 hours
-  * Execution time: ~30 minutes (2h timeout)
+  * Execution time: ~10 minutes (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Per Package ACLs stored in Launchpad
   * Old location: https://ubuntu-archive-team.ubuntu.com/archive-permissions/
@@ -51,7 +51,7 @@ from various sources depending on the respective service.
 * packageset-report
   * TL;DR: Convert LP API data into a report about package sets as used for upload permissions
   * Timing: every 6 hours
-  * Execution time: ~30 minutes (2h timeout)
+  * Execution time: ~10 minutes (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Package Set information stored in Launchpad
   * Old location: https://ubuntu-archive-team.ubuntu.com/packagesets/
