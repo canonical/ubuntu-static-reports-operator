@@ -7,6 +7,7 @@ import email.message
 import importlib.util
 import io
 import json
+import logging
 import socket
 import sys
 import urllib.error
@@ -218,6 +219,35 @@ def test_germinate_ubuntu_proposed_germinates_launchpad_devel(monkeypatch, tmp_p
     assert germinate.main(["--pocket", "proposed", "-o", str(tmp_path)]) == 0
     expected_ogre = ["stonking", "stonking-security", "stonking-updates", "stonking-proposed"]
     assert calls == [("stonking-proposed", expected_ogre)]
+
+
+def test_germinate_suite_raises_when_arch_child_fails(monkeypatch, tmp_path):
+    # germinate is apt-only on the unit, absent from the dev venv
+    for module in ("", ".archive", ".germinator", ".log", ".seeds"):
+        monkeypatch.setitem(sys.modules, f"germinate{module}", MagicMock())
+    germinate = _load_script("germinate-ubuntu")
+
+    # Simulate the fork layer: a parent that only reads the child pipe and
+    # reaps a child which exited 1 - the failure must propagate, not be
+    # discarded, or partial snapshots publish as success.
+    monkeypatch.setattr(germinate, "_make_seed_structures", lambda *_: {"minimal": object()})
+    monkeypatch.setattr(germinate, "_archs_from_release", lambda *_: ["amd64"])
+    monkeypatch.setattr(germinate.os, "fork", lambda: 1234)
+    monkeypatch.setattr(germinate.os, "pipe", lambda: (3, 4))
+    monkeypatch.setattr(germinate.os, "fdopen", lambda *args: MagicMock())
+    monkeypatch.setattr(germinate.os, "close", lambda fd: None)
+    monkeypatch.setattr(germinate.os, "waitpid", lambda pid, opts: (1234, 256))
+    monkeypatch.setattr(germinate.pickle, "load", lambda reader: ([], set()))
+
+    with pytest.raises(RuntimeError, match="child process 1234 failed"):
+        germinate.germinate_suite(
+            "noble",
+            ["minimal"],
+            "file:///unused",
+            str(tmp_path),
+            None,
+            logging.getLogger("test"),
+        )
 
 
 def test_germinate_ubuntu_continues_after_series_failure(monkeypatch, tmp_path):
