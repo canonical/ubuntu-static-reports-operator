@@ -81,6 +81,9 @@ LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oau
 ARCHIVE_MIRROR_ENV_PATH = "/etc/staticreports/archive-mirror.env"
 MISMATCHES_ENV_PATH = "/etc/staticreports/mismatches.env"
 SEEDED_IN_UBUNTU_INDEXER_ENV_PATH = "/etc/staticreports/seeded-in-ubuntu-indexer.env"
+GERMINATE_BACKPORT_PATCH = Path(
+    "/usr/local/share/staticreports/germinate-cross-flavour-blacklist.patch"
+)
 
 # germinate's real (hardlink-friendly) storage lives under mirror_dir, next to
 # the archive snapshots; this is the stable web path symlinked to its `current`.
@@ -332,6 +335,14 @@ class StaticReports:
 
         logger.info("Install 4/6 Installing App and Config files")
         try:
+            # TODO: Remove this backport payload, helper and pre-start invocation
+            # once LP: #2173572 is fixed in Ubuntu's germinate for this base.
+            os.makedirs(GERMINATE_BACKPORT_PATCH.parent, exist_ok=True)
+            shutil.copy(
+                "src/patches/germinate-cross-flavour-blacklist.patch",
+                GERMINATE_BACKPORT_PATCH,
+            )
+            shutil.copy("src/script/apply-germinate-backport", "/usr/bin")
             # lp_series.py must be in place before the scripts that import it.
             shutil.copy("src/script/lp_series.py", "/usr/bin")
             shutil.copy("src/script/update-bugpatterns", "/usr/bin")
