@@ -356,10 +356,13 @@ def test_get_external_url_prioritizes_ingress_url_over_binding(
     lpoauth_mock.assert_called()
 
 
-def test_config_changed_event_blocks_charm_when_lp_secret_not_configured(ctx, base_state):
+def test_config_changed_sets_active_message_when_lp_secret_not_configured(ctx, base_state):
+    """Without the optional LP token the charm stays active with a hint."""
     out = ctx.run(ctx.on.config_changed(), base_state)
 
-    assert out.unit_status == BlockedStatus("Launchpad oauth token config missing.")
+    assert out.unit_status == ActiveStatus(
+        "Launchpad oauth token not configured - authenticated reports are disabled."
+    )
 
 
 @patch("charm.StaticReports.configure_lpoauthkey")
