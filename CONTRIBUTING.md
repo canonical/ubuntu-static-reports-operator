@@ -76,7 +76,7 @@ staging VM. It packs the charm, runs nested LXD/Juju inside the VM and
 deploys the unit with real systemd services to poke at.
 
 ```bash
-workshop launch staging        # ~26.04 VM with all tools (takes a while)
+workshop launch staging        # ~24.04 VM with all tools (takes a while)
 workshop run staging -- lint   # make lint inside the VM
 workshop run staging -- unit   # make unit inside the VM
 workshop run staging -- deploy # pack + juju deploy (see below)

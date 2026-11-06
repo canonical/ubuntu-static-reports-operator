@@ -1,5 +1,6 @@
 name: staging
-base: ubuntu@26.04
+# match the charm base, see charmcraft.yaml
+base: ubuntu@24.04
 runtime: lxd-vm
 sdks:
   - name: uv
