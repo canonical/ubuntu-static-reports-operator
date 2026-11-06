@@ -227,16 +227,23 @@ def test_germinate_suite_raises_when_arch_child_fails(monkeypatch, tmp_path):
         monkeypatch.setitem(sys.modules, f"germinate{module}", MagicMock())
     germinate = _load_script("germinate-ubuntu")
 
-    # Simulate the fork layer: a parent that only reads the child pipe and
-    # reaps a child which exited 1 - the failure must propagate, not be
-    # discarded, or partial snapshots publish as success.
+    # Simulate the fork layer: a parent that reads every child pipe and reaps
+    # every child, including one which exited 1 - the failure must propagate,
+    # not be discarded, or partial snapshots publish as success.
     monkeypatch.setattr(germinate, "_make_seed_structures", lambda *_: {"minimal": object()})
-    monkeypatch.setattr(germinate, "_archs_from_release", lambda *_: ["amd64"])
-    monkeypatch.setattr(germinate.os, "fork", lambda: 1234)
+    monkeypatch.setattr(germinate, "_archs_from_release", lambda *_: ["amd64", "arm64"])
+    pids = iter([1234, 5678])
+    waited = []
+
+    def fake_waitpid(pid, opts):
+        waited.append(pid)
+        return pid, 256 if pid == 1234 else 0
+
+    monkeypatch.setattr(germinate.os, "fork", lambda: next(pids))
     monkeypatch.setattr(germinate.os, "pipe", lambda: (3, 4))
     monkeypatch.setattr(germinate.os, "fdopen", lambda *args: MagicMock())
     monkeypatch.setattr(germinate.os, "close", lambda fd: None)
-    monkeypatch.setattr(germinate.os, "waitpid", lambda pid, opts: (1234, 256))
+    monkeypatch.setattr(germinate.os, "waitpid", fake_waitpid)
     monkeypatch.setattr(germinate.pickle, "load", lambda reader: ([], set()))
 
     with pytest.raises(RuntimeError, match="child process 1234 failed"):
@@ -248,6 +255,8 @@ def test_germinate_suite_raises_when_arch_child_fails(monkeypatch, tmp_path):
             None,
             logging.getLogger("test"),
         )
+
+    assert waited == [1234, 5678]
 
 
 def test_germinate_ubuntu_continues_after_series_failure(monkeypatch, tmp_path):
