@@ -18,6 +18,7 @@ actions:
   lint: make lint
   format: make format
   unit: make unit
+  integration: bash /project/.workshop/staging/manage integration "$@"
   build: sg lxd -c "charmcraft pack --use-lxd $*"
   deploy: bash /project/.workshop/staging/manage deploy "$@"
   redeploy: bash /project/.workshop/staging/manage redeploy "$@"

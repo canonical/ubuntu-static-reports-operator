@@ -17,7 +17,12 @@ def juju():
 
 @fixture(scope="module")
 def lpuser_secret(juju):
-    """Create and grant Launchpad OAuth secret if LPUSER_OAUTH_FILE is set."""
+    """Create the Launchpad OAuth secret if LPUSER_OAUTH_FILE is set.
+
+    Granting to the application happens after the deploy tests created it
+    (see configure_lp_secret) - Juju cannot grant a secret to an
+    application that does not exist yet.
+    """
     oauth_file = os.environ.get("LPUSER_OAUTH_FILE")
     if not oauth_file or not Path(oauth_file).exists():
         return None
@@ -25,14 +30,10 @@ def lpuser_secret(juju):
     with open(oauth_file) as f:
         oauth_content = f.read()
 
-    secret_uri = juju.add_secret(
+    return juju.add_secret(
         name="lpuser-oauth",
         content={"lpoauthkey": oauth_content},
     )
-
-    juju.grant_secret(secret_uri, "ubuntu-static-reports")
-
-    return secret_uri
 
 
 @fixture(scope="module")
@@ -40,17 +41,14 @@ def ubuntu_static_reports_charm(request):
     """Build or return path to ubuntu-static-reports charm file."""
     charm_file = request.config.getoption("--charm-path")
     if not charm_file:
-        working_dir = os.getenv("SPREAD_PATH", Path("."))
-
         subprocess.run(
-            ["/snap/bin/charmcraft", "pack", "--verbose"],
+            ["charmcraft", "pack", "--verbose"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            cwd=working_dir,
             check=True,
         )
 
-        charm_file = next(Path.glob(Path(working_dir), "*.charm")).absolute()
+        charm_file = next(Path.glob(Path("."), "*.charm")).absolute()
 
     return charm_file
