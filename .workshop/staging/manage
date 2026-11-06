@@ -90,14 +90,21 @@ then connect the secret once:
 }
 
 write_lp_token() {
-  # Best-effort token file for the secret-dependent integration tests - they
-  # skip gracefully when LPUSER_OAUTH_FILE is unset (unlike deploy, no die()).
+  # Token file for juju_secret and the secret-dependent integration tests -
+  # the latter skip gracefully when LPUSER_OAUTH_FILE is unset (no die()).
+  # An argument overrides the best-effort self fetch. The file must live in
+  # ~/snap/juju/common: the juju snap reads it via key#file=, and its home
+  # confinement cannot see dotdirs like ~/.cache.
   local token
-  token="$(workshopctl get-secret "$SECRET_PLUG" 2>/dev/null || true)"
+  token="${1:-}"
+  if [ -z "$token" ]; then
+    token="$(workshopctl get-secret "$SECRET_PLUG" 2>/dev/null || true)"
+  fi
   [ -n "$token" ] || return 1
   local file
-  file="$HOME/.cache/lpuser-oauth.txt"
+  file="$HOME/snap/juju/common/lpuser-oauth.txt"
   umask 077
+  mkdir -p "$HOME/snap/juju/common"
   printf '%s\n' "$token" > "$file"
   echo "$file"
 }
@@ -153,13 +160,19 @@ except Exception:
 }
 
 juju_secret() {
-  local token id
+  # The token is passed via key#file= so it never appears in the process
+  # list. The URI comes from add-secret's stdout; show-secret's JSON keys
+  # may or may not carry the secret: prefix, so normalize instead of
+  # trusting either shape.
+  local token file id
   token="$(lp_token)"
-  juju add-secret "$SECRET_NAME" "lpoauthkey=${token}" 2>/dev/null \
-    || juju update-secret "$SECRET_NAME" "lpoauthkey=${token}"
-  id="secret:$(juju show-secret "$SECRET_NAME" --format json | python3 -c 'import json, sys; print(next(iter(json.load(sys.stdin))))')"
+  file="$(write_lp_token "$token")"
+  if ! id="$(juju add-secret "$SECRET_NAME" "lpoauthkey#file=${file}" 2>/dev/null)"; then
+    juju update-secret "$SECRET_NAME" "lpoauthkey#file=${file}"
+    id="$(juju show-secret "$SECRET_NAME" --format json | python3 -c 'import json, sys; print(next(iter(json.load(sys.stdin))))')"
+  fi
   juju grant-secret "$SECRET_NAME" "$APP" 2>/dev/null || true
-  juju config "$APP" "lpuser_secret_id=${id}"
+  juju config "$APP" "lpuser_secret_id=secret:${id#secret:}"
 }
 
 deploy() {
