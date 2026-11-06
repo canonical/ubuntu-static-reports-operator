@@ -1,0 +1,170 @@
+Description: copy_growth() reuses global-blacklist results across seed structures
+ In Germinate 2.44, a single Germinator processing multiple seed structures
+ can reuse growth between equivalent seeds even when those structures have
+ different global blacklists.
+ .
+ GerminatedSeed.copy_growth() copies the donor seed's `_blacklisted` set
+ unchanged. That set is specific to the donor structure's global blacklist,
+ while each destination structure has its own `output._blacklist` mapping.
+ .
+ Consequences:
+ .
+ 1. write_blacklisted() can raise KeyError when a source package copied from
+    the donor is absent from the destination's blacklist mapping:
+ .
+     blacklist = output._blacklist[pkg]
+ .
+ 2. Simply filtering unknown packages at output time would silently lose
+    packages that are blacklisted only by the destination structure.
+ .
+ A concrete reproduction is:
+ .
+ - Structure one's blacklist contains `common` and `one-only`.
+ - Structure two's blacklist contains `common` and `two-only`.
+ - Both structures contain equivalent seeds.
+ - The seed has Build-Depends on `common` and `one-only`, and Built-Using on
+   `two-only`.
+ .
+ After structure one has grown, structure two reuses its growth. Calling
+ write_blacklisted() for structure two raises:
+ .
+     KeyError: 'one-only'
+ .
+ This also occurs with real Ubuntu seed structures. For example, Trusty's
+ Kubuntu, Lubuntu and Platform structures have equivalent seeds but different
+ global blacklists. Depending on flavour order, failures include:
+ .
+     KeyError: 'geoip-database'
+     KeyError: 'gconf'
+ .
+ The attached patch makes copy_growth() compare the donor and destination
+ global-blacklist key sets. If they differ, it abandons cached growth by
+ clearing `_copy` and returning, allowing normal growth to run against the
+ destination blacklist. Identical key sets retain the existing cache
+ optimization; annotation text need not match.
+ .
+ The patch deliberately falls back to normal growth instead of recomputing
+ from the donor's `_build_sourcepkgs`, because write_build_sources_list()
+ mutates that set during output generation and it therefore cannot always be
+ used as a reliable record of the original build-tree sources.
+ .
+ The included regression test covers:
+ .
+ - donor-only and destination-only blacklist entries;
+ - Build-Depends and Built-Using sources;
+ - donor output generation before cached growth;
+ - preservation of the donor's original results;
+ - successful write_blacklisted() output for the destination.
+ .
+ Validation:
+ .
+ - Without the production change, the regression test fails with
+   `KeyError: 'one-only'`.
+ - With the change, all 20 tests in germinate.tests.test_germinator pass.
+ .
+ The patch targets Germinate 2.44. Current upstream main requires the same
+ logical change using the newer `_blocklist` terminology.
+Bug: https://bugs.launchpad.net/ubuntu/+source/germinate/+bug/2173572
+
+diff --git a/germinate/germinator.py b/germinate/germinator.py
+index 838c4ea..7030f7b 100644
+--- a/germinate/germinator.py
++++ b/germinate/germinator.py
+@@ -190,6 +190,15 @@ class GerminatedSeed:
+ 
+         assert copy._grown
+ 
++        # Global blacklists are structure-specific, so only share growth when
++        # the source packages they name are identical.
++        if (
++            self._germinator._output[self.structure]._blacklist.keys()
++            != self._germinator._output[copy.structure]._blacklist.keys()
++        ):
++            self._copy = None
++            return
++
+         # We deliberately don't take copies of anything; this seed has been
+         # grown and thus should not be modified further, and deep copies
+         # would take up substantial amounts of memory.
+diff --git a/germinate/tests/test_germinator.py b/germinate/tests/test_germinator.py
+index c8d470b..bd4218d 100644
+--- a/germinate/tests/test_germinator.py
++++ b/germinate/tests/test_germinator.py
+@@ -17,6 +17,7 @@
+ # Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+ # 02110-1301, USA.
+ 
++import io
+ import logging
+ import shutil
+ 
+@@ -666,4 +667,69 @@ class TestGerminator(TestCase):
+             germinator.get_seed_alternatives(structure, "base"),
+         )
+ 
++    def test_regrow_when_global_blacklist_differs(self):
++        self.addSource(
++            "warty",
++            "main",
++            "hello",
++            "1.0-1",
++            ["hello"],
++            fields={"Build-Depends": "common, one-only"},
++        )
++        self.addPackage(
++            "warty",
++            "main",
++            "i386",
++            "hello",
++            "1.0-1",
++            fields={"Built-Using": "two-only (= 1.0-1)"},
++        )
++        for pkg in ("common", "one-only", "two-only"):
++            self.addSource("warty", "main", pkg, "1.0-1", [pkg])
++            self.addPackage("warty", "main", "i386", pkg, "1.0-1")
++
++        one = "one.dist"
++        two = "two.dist"
++        for branch in (one, two):
++            self.addSeed(branch, "base")
++            self.addSeedPackage(branch, "base", "hello")
++            self.addSeedPackage(branch, "base", "two-only")
++        structure_one = self.openSeedStructure(one)
++        structure_two = self.openSeedStructure(two)
++        germinator = Germinator("i386")
++        archive = TagFile(
++            "warty", "main", "i386", "file://%s" % self.archive_dir
++        )
++        germinator.parse_archive(archive)
++
++        germinator.plant_seeds(structure_one)
++        germinator.parse_blacklist(
++            structure_one,
++            io.StringIO("# blacklist: one\ncommon\none-only\n"),
++        )
++        germinator.grow(structure_one)
++        seed_one = germinator._get_seed(structure_one, "base")
++        self.assertEqual({"common", "one-only"}, seed_one._blacklisted)
++        germinator.write_build_sources_list(
++            structure_one, "base.build-sources", "base"
++        )
++        self.assertEqual({"common", "one-only"}, seed_one._build_sourcepkgs)
++
++        germinator.plant_seeds(structure_two)
++        germinator.parse_blacklist(
++            structure_two, io.StringIO("# blacklist: two\ncommon\ntwo-only\n")
++        )
++        seed_two = germinator._get_seed(structure_two, "base")
++        self.assertIs(seed_one, seed_two._copy)
++        germinator.grow(structure_two)
++        germinator.write_blacklisted(structure_two, "blacklisted")
++
++        self.assertIsNone(seed_two._copy)
++        self.assertEqual({"common", "two-only"}, seed_two._blacklisted)
++        self.assertEqual({"common", "one-only"}, seed_one._blacklisted)
++        with open("blacklisted") as blacklisted:
++            self.assertEqual(
++                "common\ttwo\ntwo-only\ttwo\n", blacklisted.read()
++            )
++
+     # TODO: Germinator needs many more unit tests.

@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Apply the Germinate cross-flavour blacklist backport idempotently.
+
+TODO: Remove this helper, its payload and the update-germinate ExecStartPre
+once https://bugs.launchpad.net/ubuntu/+source/germinate/+bug/2173572 is
+fixed in Ubuntu's germinate package for every supported charm base.
+"""
+
+import logging
+import subprocess
+import sys
+from pathlib import Path
+
+BACKPORT_URL = "https://bugs.launchpad.net/ubuntu/+source/germinate/+bug/2173572"
+PATCH = Path("/usr/local/share/staticreports/germinate-cross-flavour-blacklist.patch")
+GIT_APPLY = (
+    "git",
+    "-C",
+    "/usr/lib/python3/dist-packages",
+    "apply",
+    "--include=germinate/germinator.py",
+)
+
+
+def _check(reverse: bool = False) -> subprocess.CompletedProcess:
+    """Check whether the backport can be applied, or reversed if installed."""
+    command = [*GIT_APPLY, "--check"]
+    if reverse:
+        command.append("--reverse")
+    command.append(str(PATCH))
+    return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+
+def main() -> int:
+    """Apply the backport if needed, accepting an already patched source."""
+    forward = _check()
+    if forward.returncode == 0:
+        subprocess.run([*GIT_APPLY, str(PATCH)], check=True)
+        logging.info("Applied Germinate backport from %s", BACKPORT_URL)
+        return 0
+
+    already_applied = _check(reverse=True)
+    if already_applied.returncode == 0:
+        return 0
+
+    logging.error(
+        "Germinate source is incompatible with the backport; review %s before "
+        "running update-germinate.\nForward check:\n%s\nAlready-installed check:\n%s",
+        BACKPORT_URL,
+        forward.stdout.strip(),
+        already_applied.stdout.strip(),
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    sys.exit(main())

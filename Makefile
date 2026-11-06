@@ -6,7 +6,8 @@ ALL := $(SRC) $(TESTS)
 
 # ruff only discovers *.py on its own; lint the extensionless python scripts
 # explicitly, F-only (undefined names) since full style findings are out of scope.
-PYTHON_SCRIPTS := $(SRC)/script/germinate-ubuntu \
+PYTHON_SCRIPTS := $(SRC)/script/apply-germinate-backport \
+	$(SRC)/script/germinate-ubuntu \
 	$(SRC)/script/seeded-in-ubuntu-indexer \
 	$(SRC)/script/update-archive-mirror \
 	$(SRC)/script/update-germinate \

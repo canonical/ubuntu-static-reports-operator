@@ -22,5 +22,7 @@ ProtectKernelModules=yes
 ProtectKernelTunables=yes
 RestrictSUIDSGID=yes
 
+# Temporary backport of LP: #2173572; remove when fixed in Ubuntu's germinate.
+ExecStartPre=!/usr/bin/apply-germinate-backport
 EnvironmentFile=-/etc/staticreports/archive-mirror.env
 ExecStart=/usr/bin/update-germinate
