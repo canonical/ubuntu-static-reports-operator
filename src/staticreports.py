@@ -578,6 +578,7 @@ class StaticReports:
         return result.stdout.strip() == "disabled"
 
     def setup_systemd_units(self):
-        """Set up all needed systemd services and timers."""
+        """Set up all needed systemd services and timers, then reload their definitions."""
         for service in UBUNTU_STATIC_REPORT_SERVICES:
             self.setup_systemd_unit(service)
+        systemd.daemon_reload()
