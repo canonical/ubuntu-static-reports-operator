@@ -11,6 +11,7 @@ from subprocess import CalledProcessError, SubprocessError
 
 import ops
 from charmlibs.apt import PackageError, PackageNotFoundError
+from charms.operator_libs_linux.v1.systemd import SystemdError
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer as IngressRequirer
 
 from staticreports import StaticReports
@@ -79,6 +80,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         except (
             CalledProcessError,
             SubprocessError,
+            SystemdError,
             PackageError,
             PackageNotFoundError,
             IOError,

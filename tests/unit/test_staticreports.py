@@ -354,16 +354,21 @@ def test_setup_systemd_unit_without_proxy_environment_variables(monkeypatch):
     assert "Environment=RSYNC_PROXY" not in written[svc_path]
 
 
-def test_setup_systemd_units_configures_all_report_services(monkeypatch):
+def test_setup_systemd_units_configures_all_report_services_then_reloads(monkeypatch):
     called = []
     monkeypatch.setattr(
         staticreports.StaticReports, "setup_systemd_unit", lambda self, s: called.append(s)
+    )
+    monkeypatch.setattr(
+        staticreports.systemd, "daemon_reload", lambda: called.append("daemon-reload")
     )
     sr = staticreports.StaticReports()
 
     sr.setup_systemd_units()
 
-    assert set(called) == set(staticreports.UBUNTU_STATIC_REPORT_SERVICES)
+    assert set(called[:-1]) == set(staticreports.UBUNTU_STATIC_REPORT_SERVICES)
+    assert called.count("daemon-reload") == 1
+    assert called[-1] == "daemon-reload"
 
 
 def test_install_packages_raises_when_package_not_found(monkeypatch):
