@@ -16,6 +16,7 @@ import ops
 import ops.testing
 import pytest
 from charmlibs.apt import PackageError, PackageNotFoundError
+from charms.operator_libs_linux.v1.systemd import SystemdError
 from ops.testing import (
     ActiveStatus,
     Address,
@@ -107,6 +108,22 @@ def test_upgrade_charm_event_sets_active_status_on_success(
 
     assert out.unit_status == ActiveStatus()
     assert install_mock.called
+
+
+@patch("charm.StaticReports.install")
+@patch("charm.StaticReports.setup_systemd_units")
+def test_upgrade_charm_event_blocks_when_systemd_reload_fails(
+    systemd_mock, install_mock, ctx, base_state
+):
+    systemd_mock.side_effect = SystemdError("systemctl daemon-reload failed")
+
+    out = ctx.run(ctx.on.upgrade_charm(), base_state)
+
+    install_mock.assert_called_once()
+    systemd_mock.assert_called_once()
+    assert out.unit_status == BlockedStatus(
+        "Failed to set up the environment. Check `juju debug-log` for details."
+    )
 
 
 @patch("charm.StaticReports.install")
