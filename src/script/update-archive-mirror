@@ -16,6 +16,7 @@ Options can be overridden on the command line or via environment variables
 
 import argparse
 import fcntl
+import hashlib
 import logging
 import os
 import shlex
@@ -99,6 +100,64 @@ def _release_mtimes(mirror: Path) -> dict[str, float]:
         except OSError:
             snapshot[str(release)] = 0
     return snapshot
+
+
+def _release_checksums(release: Path) -> tuple[str, dict[str, tuple[int, str]]]:
+    """Return the strongest available checksum algorithm and its Release entries."""
+    sections: dict[str, dict[str, tuple[int, str]]] = {"SHA512": {}, "SHA256": {}}
+    section = None
+    for line in release.read_text(encoding="utf-8").splitlines():
+        if not line[:1].isspace():
+            section = line[:-1] if line[:-1] in sections and line.endswith(":") else None
+            continue
+        if section is None:
+            continue
+        try:
+            digest, size, filename = line.split()
+            sections[section][filename] = (int(size), digest)
+        except ValueError as error:
+            raise ValueError(f"Invalid {section} entry in {release}: {line!r}") from error
+    for field, algorithm in (("SHA512", "sha512"), ("SHA256", "sha256")):
+        if sections[field]:
+            return algorithm, sections[field]
+    raise ValueError(f"No SHA512 or SHA256 entries in {release}")
+
+
+def _hash_file(path: Path, algorithm: str) -> str:
+    digest = hashlib.new(algorithm)
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_indices(snapshot_ubuntu: Path) -> int:
+    """Validate all merged Packages/Sources files against the primary Releases."""
+    releases = sorted((snapshot_ubuntu / "dists").glob("*/Release"))
+    if not releases:
+        raise ValueError(f"No Release files found below {snapshot_ubuntu / 'dists'}")
+    validated = 0
+    for release in releases:
+        algorithm, checksums = _release_checksums(release)
+        suite = release.parent
+        patterns = (
+            "*/binary-*/Packages*",
+            "*/debian-installer/binary-*/Packages*",
+            "*/source/Sources*",
+        )
+        indices = {path for pattern in patterns for path in suite.glob(pattern) if path.is_file()}
+        for index in sorted(indices):
+            relative = index.relative_to(suite).as_posix()
+            if relative not in checksums:
+                raise ValueError(f"No {algorithm.upper()} entry for {index} in {release}")
+            expected_size, expected_digest = checksums[relative]
+            if index.stat().st_size != expected_size:
+                raise ValueError(f"Size mismatch for {index} against {release}")
+            if _hash_file(index, algorithm) != expected_digest:
+                raise ValueError(f"Checksum mismatch for {index} against {release}")
+            validated += 1
+    logger.info("Validated %d archive index files against their Release metadata.", validated)
+    return validated
 
 
 def _series_filters() -> list:
@@ -260,6 +319,12 @@ def sync_and_publish(
     # the work mirror cannot mutate the staged snapshot.
     _run(["cp", "-al", str(mirror), str(staging / "ubuntu")])
     _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
+    try:
+        _validate_indices(staging / "ubuntu")
+    except (OSError, ValueError) as error:
+        logger.error("Archive snapshot validation failed: %s; keeping previous snapshot.", error)
+        shutil.rmtree(staging, ignore_errors=True)
+        return 1
     # stamp is for main archive Release file
     _write_stamp(staging, primary_mtimes)
     snapshot = out / snapshot_name
