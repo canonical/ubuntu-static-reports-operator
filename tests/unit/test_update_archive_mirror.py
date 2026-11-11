@@ -167,13 +167,13 @@ def test_mismatched_ports_index_preserves_current(mirror, monkeypatch, tmp_path)
     ).read_bytes() == INDICES["main/binary-arm64/Packages.gz"]
 
 
-@pytest.mark.parametrize("require_complete", [True, False])
-def test_valid_release_without_indices_fails_validation(mirror, tmp_path, require_complete):
+@pytest.mark.parametrize("ports_enabled", [True, False])
+def test_valid_release_without_indices_fails_validation(mirror, tmp_path, ports_enabled):
     root = tmp_path / "ubuntu"
     _write_release(root, {"main/i18n/Translation-en": b"translation metadata"})
 
     with pytest.raises(ValueError, match="No Packages/Sources index files"):
-        mirror._validate_indices(root, require_complete=require_complete)
+        mirror._validate_indices(root, ports_enabled=ports_enabled)
 
 
 @pytest.mark.parametrize(
@@ -216,6 +216,41 @@ def test_primary_only_mode_does_not_require_ports_indices(mirror, monkeypatch, t
     assert not (
         snapshots[0] / "ubuntu" / "dists" / SUITE / "main/binary-arm64/Packages.gz"
     ).exists()
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "main/source/Sources.gz",
+        "main/binary-amd64/Packages.gz",
+        "main/binary-amd64v3/Packages.gz",
+        "main/binary-i386/Packages.gz",
+    ],
+)
+def test_primary_only_missing_required_index_preserves_current(
+    mirror, monkeypatch, tmp_path, missing
+):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    primary_indices = {
+        **INDICES,
+        "main/binary-amd64v3/Packages.gz": b"amd64v3 packages",
+        "main/binary-i386/Packages.gz": b"i386 packages",
+    }
+    for relative, content in primary_indices.items():
+        if "binary-arm64" not in relative:
+            _write_index(primary, relative, content)
+    _write_release(primary, primary_indices)
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: None)
+    assert mirror.sync_and_publish(out, "primary", "") == 0
+    current = (out / "current").resolve()
+
+    (primary / "dists" / SUITE / missing).unlink()
+    assert mirror.sync_and_publish(out, "primary", "", force=True) == 1
+
+    assert (out / "current").resolve() == current
+    assert len(list(out.glob("snapshot.*"))) == 1
 
 
 def test_disabled_ports_ignore_stale_metadata_and_indices(mirror, monkeypatch, tmp_path):

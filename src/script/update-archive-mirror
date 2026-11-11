@@ -8,6 +8,7 @@ from <out>/current/ubuntu/.
 
 A new snapshot is only published when the archive Release identities changed.
 Ports-enabled candidates must cover the same suites and contain every listed index.
+Primary-only candidates require all Sources and primary-export architecture Packages.
 All merged indices must match the primary Release, which describes ports architectures
 as well as primary ones. Dates guard against regression; different Releases are valid
 when their selected bytes are coherent. Rejected candidates leave current untouched.
@@ -32,13 +33,16 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import lp_series
 
 logger = logging.getLogger("update-archive-mirror")
 
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
+
+# Binary index directories exported by archive.ubuntu.com rather than ports.
+PRIMARY_BINARY_DIRS = frozenset({"binary-amd64", "binary-amd64v3", "binary-i386"})
 
 
 def _sd_notify(message: str) -> None:
@@ -160,17 +164,22 @@ def _read_releases(mirror: Path) -> dict[str, ReleaseInfo]:
 
 
 def _expected_indices(
-    releases: dict[str, ReleaseInfo], require_complete: bool
+    releases: dict[str, ReleaseInfo], ports_enabled: bool
 ) -> set[tuple[str, str]]:
-    """Return the suite/index pairs required in a complete merged snapshot."""
-    if not require_complete:
-        return set()
-    return {
-        (suite, filename)
-        for suite, info in releases.items()
-        for filename in info.checksums
-        if filename.rsplit("/", 1)[-1].startswith(("Packages", "Sources"))
-    }
+    """Return the suite/index pairs required for this source configuration."""
+    expected = set()
+    for suite, info in releases.items():
+        for filename in info.checksums:
+            basename = filename.rsplit("/", 1)[-1]
+            if not basename.startswith(("Packages", "Sources")):
+                continue
+            if (
+                basename.startswith("Sources")
+                or ports_enabled
+                or PRIMARY_BINARY_DIRS.intersection(PurePosixPath(filename).parts)
+            ):
+                expected.add((suite, filename))
+    return expected
 
 
 def _hash_file(path: Path, algorithm: str) -> str:
@@ -181,7 +190,7 @@ def _hash_file(path: Path, algorithm: str) -> str:
     return digest.hexdigest()
 
 
-def _validate_indices(snapshot_ubuntu: Path, require_complete: bool = True) -> int:
+def _validate_indices(snapshot_ubuntu: Path, ports_enabled: bool = True) -> int:
     """Validate merged indices against primary's all-architecture manifest.
 
     The primary export does not serve ports files, but its Release describes them.
@@ -201,7 +210,7 @@ def _validate_indices(snapshot_ubuntu: Path, require_complete: bool = True) -> i
     if not indices:
         raise ValueError(f"No Packages/Sources index files found below {dists}")
 
-    expected = _expected_indices(releases, require_complete)
+    expected = _expected_indices(releases, ports_enabled)
 
     index_data = []
     actual = set()
@@ -488,7 +497,7 @@ def _sync_and_publish_locked(
     if ports_rsync_source:
         _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
     try:
-        _validate_indices(staging / "ubuntu", require_complete=bool(ports_rsync_source))
+        _validate_indices(staging / "ubuntu", ports_enabled=bool(ports_rsync_source))
     except (OSError, ValueError) as error:
         logger.error("Archive snapshot validation failed: %s; keeping previous snapshot.", error)
         shutil.rmtree(staging, ignore_errors=True)
