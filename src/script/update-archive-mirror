@@ -454,7 +454,7 @@ def _sync_and_publish_locked(
     sync_archive(mirror, archive_rsync_source, ports_rsync_source)
     try:
         primary = _read_releases(mirror)
-        ports = _read_releases(ports_mirror)
+        ports = _read_releases(ports_mirror) if ports_rsync_source else {}
         stamp = _read_stamp(current)
     except (OSError, UnicodeError, ValueError) as error:
         logger.error(
@@ -485,7 +485,8 @@ def _sync_and_publish_locked(
     # Freeze the just-synced indices with hardlinks so a later rsync into
     # the work mirror cannot mutate the staged snapshot.
     _run(["cp", "-al", str(mirror), str(staging / "ubuntu")])
-    _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
+    if ports_rsync_source:
+        _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
     try:
         _validate_indices(staging / "ubuntu", require_complete=bool(ports_rsync_source))
     except (OSError, ValueError) as error:

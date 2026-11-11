@@ -218,6 +218,29 @@ def test_primary_only_mode_does_not_require_ports_indices(mirror, monkeypatch, t
     ).exists()
 
 
+def test_disabled_ports_ignore_stale_metadata_and_indices(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: None)
+    assert mirror.sync_and_publish(out, "primary", "ports") == 0
+    first = (out / "current").resolve()
+
+    _write_file(ports / "dists" / SUITE / "Release", b"malformed stale metadata")
+    _write_index(ports, "main/binary-arm64/Packages.gz", b"corrupt stale packages")
+    assert mirror.sync_and_publish(out, "primary", "") == 0
+
+    second = (out / "current").resolve()
+    assert second != first
+    assert not (second / "ubuntu" / "dists" / SUITE / "main/binary-arm64/Packages.gz").exists()
+    assert "Ports-Release" not in (second / "STAMP").read_text()
+
+    assert mirror.sync_and_publish(out, "primary", "") == 0
+    assert len(list(out.glob("snapshot.*"))) == 2
+
+
 def test_unlisted_indices_are_not_required(mirror, tmp_path):
     root = tmp_path / "ubuntu"
     relative = "main/source/Sources.gz"
