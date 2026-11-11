@@ -308,6 +308,17 @@ def _same_release_inputs(
     )
 
 
+def _validate_suite_coverage(
+    primary: dict[str, ReleaseInfo], ports: dict[str, ReleaseInfo], ports_enabled: bool
+) -> None:
+    """Require both configured archives to provide metadata for the same suites."""
+    if not ports_enabled or primary.keys() == ports.keys():
+        return
+    primary_only = sorted(primary.keys() - ports.keys())
+    ports_only = sorted(ports.keys() - primary.keys())
+    raise ValueError(f"Primary-only suites: {primary_only}; ports-only suites: {ports_only}")
+
+
 def _validate_release_progress(
     primary: dict[str, ReleaseInfo], ports: dict[str, ReleaseInfo], stamp: dict[str, str]
 ) -> None:
@@ -423,9 +434,10 @@ def _sync_and_publish_locked(
         logger.info("No archive changes since last snapshot; nothing to do.")
         return 0
     try:
+        _validate_suite_coverage(primary, ports, bool(ports_rsync_source))
         _validate_release_progress(primary, ports, stamp)
     except ValueError as error:
-        logger.error("Archive Release regression: %s; keeping previous snapshot.", error)
+        logger.error("Archive Release validation failed: %s; keeping previous snapshot.", error)
         return 1
 
     snapshot_name = "snapshot." + time.strftime("%Y%m%dT%H%M%S", time.gmtime())

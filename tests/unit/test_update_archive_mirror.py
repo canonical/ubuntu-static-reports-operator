@@ -102,6 +102,50 @@ def test_coherent_primary_and_ports_snapshot_publishes(mirror, monkeypatch, tmp_
     assert "Ports-Release-SHA256-tenacious:" in stamp
 
 
+def test_empty_ports_release_set_preserves_current(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: None)
+    assert mirror.sync_and_publish(out, "primary", "ports") == 0
+    current = (out / "current").resolve()
+
+    for release in (ports / "dists").glob("*/Release"):
+        release.unlink()
+    assert mirror.sync_and_publish(out, "primary", "ports") == 1
+
+    assert (out / "current").resolve() == current
+    assert len(list(out.glob("snapshot.*"))) == 1
+
+
+@pytest.mark.parametrize(
+    "ports_suites, expected",
+    [
+        ({"tenacious"}, "Primary-only suites: \\['noble'\\]"),
+        ({"tenacious", "noble", "resolute"}, "ports-only suites: \\['resolute'\\]"),
+    ],
+)
+def test_suite_coverage_rejects_missing_or_extra_suites(mirror, tmp_path, ports_suites, expected):
+    primary_root = tmp_path / "primary"
+    _write_release(primary_root, INDICES)
+    info = mirror._read_releases(primary_root)["tenacious"]
+    primary = {"tenacious": info, "noble": info}
+    ports = dict.fromkeys(ports_suites, info)
+
+    with pytest.raises(ValueError, match=expected):
+        mirror._validate_suite_coverage(primary, ports, True)
+
+
+def test_suite_coverage_allows_mismatches_when_ports_disabled(mirror, tmp_path):
+    primary_root = tmp_path / "primary"
+    _write_release(primary_root, INDICES)
+    info = mirror._read_releases(primary_root)["tenacious"]
+
+    mirror._validate_suite_coverage({"tenacious": info, "noble": info}, {}, False)
+
+
 def test_mismatched_ports_index_preserves_current(mirror, monkeypatch, tmp_path):
     out = tmp_path / "archive"
     primary = out / "work" / "ubuntu"
