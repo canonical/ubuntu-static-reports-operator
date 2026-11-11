@@ -6,9 +6,11 @@ something changed—freezes a hardlink copy as a new snapshot and atomically
 repoints <out>/current at it.  Downstream consumers (NBS, germinate) read
 from <out>/current/ubuntu/.
 
-A new snapshot is only published when the archive Release identities changed
-and all merged Packages/Sources files match the primary Release metadata.
-Regressing or inconsistent candidates leave the previous snapshot untouched.
+A new snapshot is only published when the archive Release identities changed.
+Ports-enabled candidates must cover the same suites and contain every listed index.
+All merged indices must match the primary Release, which describes ports architectures
+as well as primary ones. Dates guard against regression; different Releases are valid
+when their selected bytes are coherent. Rejected candidates leave current untouched.
 Most timer ticks exit cheaply after the rsync.  update-germinate is triggered
 on success via systemd OnSuccess=.
 
@@ -180,7 +182,10 @@ def _hash_file(path: Path, algorithm: str) -> str:
 
 
 def _validate_indices(snapshot_ubuntu: Path, require_complete: bool = True) -> int:
-    """Validate all merged Packages/Sources files against the primary Releases."""
+    """Validate merged indices against primary's all-architecture manifest.
+
+    The primary export does not serve ports files, but its Release describes them.
+    """
     dists = snapshot_ubuntu / "dists"
     releases = {
         release.parent.name: _read_release(release) for release in dists.glob("*/Release")
@@ -351,7 +356,7 @@ def _validate_suite_coverage(
 def _validate_release_progress(
     primary: dict[str, ReleaseInfo], ports: dict[str, ReleaseInfo], stamp: dict[str, str]
 ) -> None:
-    """Reject candidates older than the accepted generation of either origin."""
+    """Reject rollback; final hashes, not Release equality, establish coherence."""
     for origin, releases in (("Primary", primary), ("Ports", ports)):
         for suite, info in releases.items():
             key = f"{origin}-Release-Date-{suite}"

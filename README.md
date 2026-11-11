@@ -81,7 +81,6 @@ from various sources depending on the respective service.
   * Execution time: seconds when nothing changed; under a minute for a full rsync (2h timeout)
   * Code: `update-archive-mirror`
   * Data: A local rsync mirror of the archive indices (the `dists` tree) from the archive (configurable via `rsync_archive_source`)
-  * Consistency: every merged `Packages*`/`Sources*` file must match the primary `Release` hashes, and primary/ports generations must not regress. Rejected candidates leave the previous `current` untouched; `STAMP` records both inputs' Release dates and identities.
   * Re-used internally by update-germinate (and potentially NBS); not exposed directly via nginx
 
 * update-germinate

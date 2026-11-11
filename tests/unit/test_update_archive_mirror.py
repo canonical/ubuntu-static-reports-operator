@@ -227,6 +227,30 @@ def test_unlisted_indices_are_not_required(mirror, tmp_path):
     assert mirror._validate_indices(root) == 1
 
 
+def test_content_hashes_decide_cross_origin_coherence(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: None)
+    assert mirror.sync_and_publish(out, "primary", "ports") == 0
+    first = (out / "current").resolve()
+
+    # Primary advances while ports remains at an older but non-regressed date.
+    updated = dict(INDICES)
+    updated["main/binary-arm64/Packages.gz"] = b"ARM64 packages"
+    _write_release(primary, updated, date=NEWER_DATE)
+    assert mirror.sync_and_publish(out, "primary", "ports") == 1
+    assert (out / "current").resolve() == first
+
+    # The same progression is valid when the selected content matches the new manifest.
+    _write_release(primary, INDICES, date=NEWER_DATE)
+    assert mirror.sync_and_publish(out, "primary", "ports") == 0
+    assert len(list(out.glob("snapshot.*"))) == 2
+    assert (out / "current").resolve() != first
+
+
 @pytest.mark.parametrize("origin", ["primary", "ports"])
 def test_older_release_from_either_origin_is_rejected(mirror, monkeypatch, tmp_path, origin):
     out = tmp_path / "archive"
