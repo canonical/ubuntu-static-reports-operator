@@ -157,6 +157,20 @@ def _read_releases(mirror: Path) -> dict[str, ReleaseInfo]:
     }
 
 
+def _expected_indices(
+    releases: dict[str, ReleaseInfo], require_complete: bool
+) -> set[tuple[str, str]]:
+    """Return the suite/index pairs required in a complete merged snapshot."""
+    if not require_complete:
+        return set()
+    return {
+        (suite, filename)
+        for suite, info in releases.items()
+        for filename in info.checksums
+        if filename.rsplit("/", 1)[-1].startswith(("Packages", "Sources"))
+    }
+
+
 def _hash_file(path: Path, algorithm: str) -> str:
     digest = hashlib.new(algorithm)
     with path.open("rb") as handle:
@@ -165,7 +179,7 @@ def _hash_file(path: Path, algorithm: str) -> str:
     return digest.hexdigest()
 
 
-def _validate_indices(snapshot_ubuntu: Path) -> int:
+def _validate_indices(snapshot_ubuntu: Path, require_complete: bool = True) -> int:
     """Validate all merged Packages/Sources files against the primary Releases."""
     dists = snapshot_ubuntu / "dists"
     releases = {
@@ -179,15 +193,29 @@ def _validate_indices(snapshot_ubuntu: Path) -> int:
         "*/*/source/Sources*",
     )
     indices = {path for pattern in patterns for path in dists.glob(pattern) if path.is_file()}
-    validated = 0
+    if not indices:
+        raise ValueError(f"No Packages/Sources index files found below {dists}")
+
+    expected = _expected_indices(releases, require_complete)
+
+    index_data = []
+    actual = set()
     for index in sorted(indices):
         relative = index.relative_to(dists)
         suite = relative.parts[0]
         if suite not in releases:
             raise ValueError(f"No primary Release for merged index {index}")
+        filename = relative.relative_to(suite).as_posix()
+        index_data.append((index, suite, filename))
+        actual.add((suite, filename))
+    missing = sorted(expected - actual)
+    if missing:
+        suite, filename = missing[0]
+        raise ValueError(f"Missing index {dists / suite / filename} listed in primary Release")
+
+    for index, suite, filename in index_data:
         release = dists / suite / "Release"
         info = releases[suite]
-        filename = relative.relative_to(suite).as_posix()
         if filename not in info.checksums:
             raise ValueError(f"No {info.algorithm.upper()} entry for {index} in {release}")
         expected_size, expected_digest = info.checksums[filename]
@@ -195,9 +223,10 @@ def _validate_indices(snapshot_ubuntu: Path) -> int:
             raise ValueError(f"Size mismatch for {index} against {release}")
         if _hash_file(index, info.algorithm) != expected_digest:
             raise ValueError(f"Checksum mismatch for {index} against {release}")
-        validated += 1
-    logger.info("Validated %d archive index files against their Release metadata.", validated)
-    return validated
+    logger.info(
+        "Validated %d archive index files against their Release metadata.", len(index_data)
+    )
+    return len(index_data)
 
 
 def _series_filters() -> list:
@@ -453,7 +482,7 @@ def _sync_and_publish_locked(
     _run(["cp", "-al", str(mirror), str(staging / "ubuntu")])
     _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
     try:
-        _validate_indices(staging / "ubuntu")
+        _validate_indices(staging / "ubuntu", require_complete=bool(ports_rsync_source))
     except (OSError, ValueError) as error:
         logger.error("Archive snapshot validation failed: %s; keeping previous snapshot.", error)
         shutil.rmtree(staging, ignore_errors=True)

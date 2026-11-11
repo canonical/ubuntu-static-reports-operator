@@ -167,6 +167,66 @@ def test_mismatched_ports_index_preserves_current(mirror, monkeypatch, tmp_path)
     ).read_bytes() == INDICES["main/binary-arm64/Packages.gz"]
 
 
+@pytest.mark.parametrize("require_complete", [True, False])
+def test_valid_release_without_indices_fails_validation(mirror, tmp_path, require_complete):
+    root = tmp_path / "ubuntu"
+    _write_release(root, {"main/i18n/Translation-en": b"translation metadata"})
+
+    with pytest.raises(ValueError, match="No Packages/Sources index files"):
+        mirror._validate_indices(root, require_complete=require_complete)
+
+
+@pytest.mark.parametrize(
+    "origin, relative",
+    [
+        ("primary", "main/source/Sources.gz"),
+        ("ports", "main/binary-arm64/Packages.gz"),
+    ],
+)
+def test_missing_required_index_preserves_current(mirror, monkeypatch, tmp_path, origin, relative):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: None)
+    assert mirror.sync_and_publish(out, "primary", "ports") == 0
+    current = (out / "current").resolve()
+
+    (primary if origin == "primary" else ports).joinpath("dists", SUITE, relative).unlink()
+    assert mirror.sync_and_publish(out, "primary", "ports", force=True) == 1
+
+    assert (out / "current").resolve() == current
+    assert len(list(out.glob("snapshot.*"))) == 1
+
+
+def test_primary_only_mode_does_not_require_ports_indices(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    for relative in ("main/source/Sources.gz", "main/binary-amd64/Packages.gz"):
+        _write_index(primary, relative, INDICES[relative])
+    _write_release(primary, INDICES)
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: None)
+
+    assert mirror.sync_and_publish(out, "primary", "") == 0
+
+    snapshots = list(out.glob("snapshot.*"))
+    assert len(snapshots) == 1
+    assert not (
+        snapshots[0] / "ubuntu" / "dists" / SUITE / "main/binary-arm64/Packages.gz"
+    ).exists()
+
+
+def test_unlisted_indices_are_not_required(mirror, tmp_path):
+    root = tmp_path / "ubuntu"
+    relative = "main/source/Sources.gz"
+    _write_index(root, relative, INDICES[relative])
+    _write_release(root, {relative: INDICES[relative]})
+
+    assert mirror._validate_indices(root) == 1
+
+
 @pytest.mark.parametrize("origin", ["primary", "ports"])
 def test_older_release_from_either_origin_is_rejected(mirror, monkeypatch, tmp_path, origin):
     out = tmp_path / "archive"
@@ -198,10 +258,10 @@ def test_rejected_candidate_is_retried_without_rsync_mtime_changes(mirror, monke
     validations = 0
     validate = mirror._validate_indices
 
-    def counted_validation(path):
+    def counted_validation(path, **kwargs):
         nonlocal validations
         validations += 1
-        return validate(path)
+        return validate(path, **kwargs)
 
     monkeypatch.setattr(mirror, "_validate_indices", counted_validation)
     assert mirror.sync_and_publish(out, "primary", "ports") == 0
@@ -290,6 +350,7 @@ def test_missing_release_checksum_entry_fails_validation(mirror, tmp_path):
     root = tmp_path / "ubuntu"
     relative = "main/source/Sources.gz"
     _write_index(root, relative, INDICES[relative])
+    _write_index(root, "main/binary-amd64/Packages.gz", b"unrelated")
     _write_release(root, {"main/binary-amd64/Packages.gz": b"unrelated"})
 
     with pytest.raises(ValueError, match="No SHA512 entry"):
