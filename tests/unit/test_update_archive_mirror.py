@@ -200,6 +200,42 @@ def test_missing_required_index_preserves_current(mirror, monkeypatch, tmp_path,
     assert len(list(out.glob("snapshot.*"))) == 1
 
 
+@pytest.mark.parametrize("ports_enabled", [True, False])
+def test_listed_but_unexported_variants_are_not_required(mirror, tmp_path, ports_enabled):
+    root = tmp_path / "ubuntu"
+    exported = {
+        "main/source/Sources.gz": INDICES["main/source/Sources.gz"],
+        "main/binary-amd64/Packages.gz": INDICES["main/binary-amd64/Packages.gz"],
+    }
+    for relative, content in exported.items():
+        _write_index(root, relative, content)
+    listed = {
+        **exported,
+        "main/source/Sources": b"unexported sources",
+        "main/source/Sources.xz": b"unexported sources.xz",
+        "main/binary-amd64/Packages": b"unexported packages",
+        "main/binary-amd64/Packages.xz": b"unexported packages.xz",
+    }
+    _write_release(root, listed)
+
+    assert mirror._validate_indices(root, ports_enabled=ports_enabled) == len(exported)
+
+
+def test_other_index_formats_do_not_replace_gzip(mirror, tmp_path):
+    root = tmp_path / "ubuntu"
+    exported = {
+        "main/source/Sources.gz": INDICES["main/source/Sources.gz"],
+        "main/binary-amd64/Packages": b"uncompressed packages",
+        "main/binary-amd64/Packages.xz": b"xz packages",
+    }
+    for relative, content in exported.items():
+        _write_index(root, relative, content)
+    _write_release(root, {**exported, "main/binary-amd64/Packages.gz": b"gzip packages"})
+
+    with pytest.raises(ValueError, match=r"Missing index .*binary-amd64/Packages\.gz"):
+        mirror._validate_indices(root)
+
+
 def test_primary_only_mode_does_not_require_ports_indices(mirror, monkeypatch, tmp_path):
     out = tmp_path / "archive"
     primary = out / "work" / "ubuntu"

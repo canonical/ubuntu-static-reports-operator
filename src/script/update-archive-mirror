@@ -7,8 +7,8 @@ repoints <out>/current at it.  Downstream consumers (NBS, germinate) read
 from <out>/current/ubuntu/.
 
 A new snapshot is only published when the archive Release identities changed.
-Ports-enabled candidates must cover the same suites and contain every listed index.
-Primary-only candidates require all Sources and primary-export architecture Packages.
+Ports-enabled candidates must cover the same suites and contain every listed gzip index.
+Primary-only candidates require all Sources.gz and primary-export architecture Packages.gz.
 All merged indices must match the primary Release, which describes ports architectures
 as well as primary ones. Dates guard against regression; different Releases are valid
 when their selected bytes are coherent. Rejected candidates leave current untouched.
@@ -166,15 +166,15 @@ def _read_releases(mirror: Path) -> dict[str, ReleaseInfo]:
 def _expected_indices(
     releases: dict[str, ReleaseInfo], ports_enabled: bool
 ) -> set[tuple[str, str]]:
-    """Return the suite/index pairs required for this source configuration."""
+    """Return the manifest-listed gzip indices needed by report consumers."""
     expected = set()
     for suite, info in releases.items():
         for filename in info.checksums:
             basename = filename.rsplit("/", 1)[-1]
-            if not basename.startswith(("Packages", "Sources")):
+            if basename not in ("Packages.gz", "Sources.gz"):
                 continue
             if (
-                basename.startswith("Sources")
+                basename == "Sources.gz"
                 or ports_enabled
                 or PRIMARY_BINARY_DIRS.intersection(PurePosixPath(filename).parts)
             ):
