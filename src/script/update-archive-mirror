@@ -6,9 +6,14 @@ something changed—freezes a hardlink copy as a new snapshot and atomically
 repoints <out>/current at it.  Downstream consumers (NBS, germinate) read
 from <out>/current/ubuntu/.
 
-A new snapshot is only published when the archive indices actually changed;
-most timer ticks exit cheaply after the rsync.  update-germinate is
-triggered on success via systemd OnSuccess=.
+A new snapshot is only published when the archive Release identities changed.
+Ports-enabled candidates must cover the same suites and contain every listed index.
+Primary-only candidates require all Sources and primary-export architecture Packages.
+All merged indices must match the primary Release, which describes ports architectures
+as well as primary ones. Dates guard against regression; different Releases are valid
+when their selected bytes are coherent. Rejected candidates leave current untouched.
+Most timer ticks exit cheaply after the rsync.  update-germinate is triggered
+on success via systemd OnSuccess=.
 
 Options can be overridden on the command line or via environment variables
 (the systemd unit sources /etc/staticreports/archive-mirror.env).
@@ -16,6 +21,7 @@ Options can be overridden on the command line or via environment variables
 
 import argparse
 import fcntl
+import hashlib
 import logging
 import os
 import shlex
@@ -24,13 +30,19 @@ import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from pathlib import Path, PurePosixPath
 
 import lp_series
 
 logger = logging.getLogger("update-archive-mirror")
 
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
+
+# Binary index directories exported by archive.ubuntu.com rather than ports.
+PRIMARY_BINARY_DIRS = frozenset({"binary-amd64", "binary-amd64v3", "binary-i386"})
 
 
 def _sd_notify(message: str) -> None:
@@ -90,15 +102,145 @@ def _run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, **kwargs)
 
 
-def _release_mtimes(mirror: Path) -> dict[str, float]:
-    """Map each mirrored Release file to its mtime (0 when unreadable)."""
-    snapshot = {}
-    for release in (mirror / "dists").glob("*/Release"):
+@dataclass(frozen=True)
+class ReleaseInfo:
+    """Publisher metadata needed to validate and identify one suite."""
+
+    date: datetime
+    digest: str
+    algorithm: str
+    checksums: dict[str, tuple[int, str]]
+
+
+def _release_date(raw_date: str | None, release: Path) -> datetime:
+    if raw_date is None:
+        raise ValueError(f"No Date field in {release}")
+    try:
+        date = parsedate_to_datetime(raw_date)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Invalid Date field in {release}: {raw_date!r}") from error
+    if date is None or date.tzinfo is None:
+        raise ValueError(f"Invalid Date field in {release}: {raw_date!r}")
+    return date.astimezone(timezone.utc)
+
+
+def _read_release(release: Path) -> ReleaseInfo:
+    """Parse a Release's date, identity and strongest available checksums."""
+    content = release.read_bytes()
+    sections: dict[str, dict[str, tuple[int, str]]] = {"SHA512": {}, "SHA256": {}}
+    section = None
+    raw_date = None
+    for line in content.decode("utf-8").splitlines():
+        if line.startswith("Date:"):
+            raw_date = line.split(":", 1)[1].strip()
+        if not line[:1].isspace():
+            section = line[:-1] if line[:-1] in sections and line.endswith(":") else None
+            continue
+        if section is None:
+            continue
         try:
-            snapshot[str(release)] = release.stat().st_mtime
-        except OSError:
-            snapshot[str(release)] = 0
-    return snapshot
+            digest, size, filename = line.split()
+            sections[section][filename] = (int(size), digest)
+        except ValueError as error:
+            raise ValueError(f"Invalid {section} entry in {release}: {line!r}") from error
+    date = _release_date(raw_date, release)
+    for field, algorithm in (("SHA512", "sha512"), ("SHA256", "sha256")):
+        if sections[field]:
+            return ReleaseInfo(
+                date=date,
+                digest=hashlib.sha256(content).hexdigest(),
+                algorithm=algorithm,
+                checksums=sections[field],
+            )
+    raise ValueError(f"No SHA512 or SHA256 entries in {release}")
+
+
+def _read_releases(mirror: Path) -> dict[str, ReleaseInfo]:
+    """Read top-level suite Releases from one archive work tree."""
+    return {
+        release.parent.name: _read_release(release)
+        for release in sorted((mirror / "dists").glob("*/Release"))
+    }
+
+
+def _expected_indices(
+    releases: dict[str, ReleaseInfo], ports_enabled: bool
+) -> set[tuple[str, str]]:
+    """Return the suite/index pairs required for this source configuration."""
+    expected = set()
+    for suite, info in releases.items():
+        for filename in info.checksums:
+            basename = filename.rsplit("/", 1)[-1]
+            if not basename.startswith(("Packages", "Sources")):
+                continue
+            if (
+                basename.startswith("Sources")
+                or ports_enabled
+                or PRIMARY_BINARY_DIRS.intersection(PurePosixPath(filename).parts)
+            ):
+                expected.add((suite, filename))
+    return expected
+
+
+def _hash_file(path: Path, algorithm: str) -> str:
+    digest = hashlib.new(algorithm)
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_indices(snapshot_ubuntu: Path, ports_enabled: bool = True) -> int:
+    """Validate merged indices against primary's all-architecture manifest.
+
+    The primary export does not serve ports files, but its Release describes them.
+    """
+    dists = snapshot_ubuntu / "dists"
+    releases = {
+        release.parent.name: _read_release(release) for release in dists.glob("*/Release")
+    }
+    if not releases:
+        raise ValueError(f"No Release files found below {dists}")
+    patterns = (
+        "*/*/binary-*/Packages*",
+        "*/*/debian-installer/binary-*/Packages*",
+        "*/*/source/Sources*",
+    )
+    indices = {path for pattern in patterns for path in dists.glob(pattern) if path.is_file()}
+    if not indices:
+        raise ValueError(f"No Packages/Sources index files found below {dists}")
+
+    expected = _expected_indices(releases, ports_enabled)
+
+    index_data = []
+    actual = set()
+    for index in sorted(indices):
+        relative = index.relative_to(dists)
+        suite = relative.parts[0]
+        if suite not in releases:
+            raise ValueError(f"No primary Release for merged index {index}")
+        filename = relative.relative_to(suite).as_posix()
+        index_data.append((index, suite, filename))
+        actual.add((suite, filename))
+    missing = sorted(expected - actual)
+    if missing:
+        suite, filename = missing[0]
+        raise ValueError(f"Missing index {dists / suite / filename} listed in primary Release")
+
+    for index, suite, filename in index_data:
+        release = dists / suite / "Release"
+        info = releases[suite]
+        if filename not in info.checksums:
+            raise ValueError(f"No {info.algorithm.upper()} entry for {index} in {release}")
+        expected_size, expected_digest = info.checksums[filename]
+        if index.stat().st_size != expected_size:
+            raise ValueError(f"Size mismatch for {index} against {release}")
+        if _hash_file(index, info.algorithm) != expected_digest:
+            raise ValueError(f"Checksum mismatch for {index} against {release}")
+    logger.info(
+        "Validated %d archive index files against their Release metadata.", len(index_data)
+    )
+    return len(index_data)
 
 
 def _series_filters() -> list:
@@ -182,12 +324,79 @@ def sync_archive(mirror: Path, archive_source: str, ports_source: str) -> None:
         _rsync_archive(ports_mirror, ports_source)
 
 
-def _write_stamp(snapshot: Path, releases: dict) -> None:
+def _read_stamp(snapshot: Path) -> dict[str, str]:
+    try:
+        lines = (snapshot / "STAMP").read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return {}
+    fields = (line.split(":", 1) for line in lines if ":" in line)
+    return {key: value.strip() for key, value in fields}
+
+
+def _release_digests_from_stamp(stamp: dict[str, str], origin: str) -> dict[str, str]:
+    prefix = f"{origin}-Release-SHA256-"
+    return {key[len(prefix) :]: value for key, value in stamp.items() if key.startswith(prefix)}
+
+
+def _same_release_inputs(
+    primary: dict[str, ReleaseInfo], ports: dict[str, ReleaseInfo], stamp: dict[str, str]
+) -> bool:
+    """Check whether the candidate Releases match the last accepted snapshot."""
+    if not primary:
+        return False
+    return all(
+        {suite: info.digest for suite, info in releases.items()}
+        == _release_digests_from_stamp(stamp, origin)
+        for origin, releases in (("Primary", primary), ("Ports", ports))
+    )
+
+
+def _validate_suite_coverage(
+    primary: dict[str, ReleaseInfo], ports: dict[str, ReleaseInfo], ports_enabled: bool
+) -> None:
+    """Require both configured archives to provide metadata for the same suites."""
+    if not ports_enabled or primary.keys() == ports.keys():
+        return
+    primary_only = sorted(primary.keys() - ports.keys())
+    ports_only = sorted(ports.keys() - primary.keys())
+    raise ValueError(f"Primary-only suites: {primary_only}; ports-only suites: {ports_only}")
+
+
+def _validate_release_progress(
+    primary: dict[str, ReleaseInfo], ports: dict[str, ReleaseInfo], stamp: dict[str, str]
+) -> None:
+    """Reject rollback; final hashes, not Release equality, establish coherence."""
+    for origin, releases in (("Primary", primary), ("Ports", ports)):
+        for suite, info in releases.items():
+            key = f"{origin}-Release-Date-{suite}"
+            if key not in stamp:
+                # Old STAMPs have no baseline. The first hash-coherent candidate
+                # establishes one; missing provenance must not block upgrades forever.
+                continue
+            previous = datetime.fromisoformat(stamp[key])
+            if previous.tzinfo is None:
+                raise ValueError(f"Invalid previous timestamp in STAMP: {key}: {stamp[key]}")
+            if info.date < previous:
+                raise ValueError(
+                    f"{origin} Release for {suite} regressed from "
+                    f"{previous.isoformat()} to {info.date.isoformat()}"
+                )
+
+
+def _write_stamp(
+    snapshot: Path, primary: dict[str, ReleaseInfo], ports: dict[str, ReleaseInfo]
+) -> None:
     lines = [
         f"Generated: {time.strftime('%a %b %e %H:%M:%S %Z %Y', time.gmtime())}",
-        f"Release-files: {len(releases)}",
-        "",
+        f"Release-files: {len(primary)}",
     ]
+    for origin, releases in (("Primary", primary), ("Ports", ports)):
+        for suite, info in sorted(releases.items()):
+            lines += [
+                f"{origin}-Release-Date-{suite}: {info.date.isoformat()}",
+                f"{origin}-Release-SHA256-{suite}: {info.digest}",
+            ]
+    lines.append("")
     (snapshot / "STAMP").write_text("\n".join(lines))
 
 
@@ -220,33 +429,59 @@ def sync_and_publish(
     retention: int = 3,
     force: bool = False,
 ) -> int:
-    """Run one sync-and-publish cycle; returns 0 on success."""
-    work = out / "work"
-    mirror = work / "ubuntu"
-    ports_mirror = work / "ubuntu-ports"
-    current = out / "current"
-
+    """Run one sync-and-publish cycle under the mirror lock."""
+    mirror = out / "work" / "ubuntu"
     mirror.mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)
 
-    lock_handle = open(HOME / ".update-archive-mirror.lock", "w")
-    try:
-        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        logger.info("Another update-archive-mirror run is in progress; exiting.")
-        return 0
+    with open(HOME / ".update-archive-mirror.lock", "w") as lock_handle:
+        try:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            logger.info("Another update-archive-mirror run is in progress; exiting.")
+            return 0
 
-    # Announce readiness now that this instance is the active worker.
-    _sd_notify("READY=1")
-    before = (_release_mtimes(mirror), _release_mtimes(ports_mirror))
+        # Announce readiness now that this instance is the active worker.
+        _sd_notify("READY=1")
+        return _sync_and_publish_locked(
+            out, archive_rsync_source, ports_rsync_source, retention, force
+        )
+
+
+def _sync_and_publish_locked(
+    out: Path,
+    archive_rsync_source: str,
+    ports_rsync_source: str,
+    retention: int,
+    force: bool,
+) -> int:
+    """Run one cycle; the caller holds the mirror lock."""
+    mirror = out / "work" / "ubuntu"
+    ports_mirror = out / "work" / "ubuntu-ports"
+    current = out / "current"
+
     sync_archive(mirror, archive_rsync_source, ports_rsync_source)
-    primary_mtimes, ports_mtimes = _release_mtimes(mirror), _release_mtimes(ports_mirror)
+    try:
+        primary = _read_releases(mirror)
+        ports = _read_releases(ports_mirror) if ports_rsync_source else {}
+        stamp = _read_stamp(current)
+    except (OSError, UnicodeError, ValueError) as error:
+        logger.error(
+            "Could not read archive Release metadata: %s; keeping previous snapshot.", error
+        )
+        return 1
 
     have_current = current.is_symlink() and current.exists()
-    rebuild = force or not have_current or (before != (primary_mtimes, ports_mtimes))
+    rebuild = force or not have_current or not _same_release_inputs(primary, ports, stamp)
     if not rebuild:
         logger.info("No archive changes since last snapshot; nothing to do.")
         return 0
+    try:
+        _validate_suite_coverage(primary, ports, bool(ports_rsync_source))
+        _validate_release_progress(primary, ports, stamp)
+    except ValueError as error:
+        logger.error("Archive Release validation failed: %s; keeping previous snapshot.", error)
+        return 1
 
     snapshot_name = "snapshot." + time.strftime("%Y%m%dT%H%M%S", time.gmtime())
     staging = out / f".staging.{snapshot_name}"
@@ -259,9 +494,15 @@ def sync_and_publish(
     # Freeze the just-synced indices with hardlinks so a later rsync into
     # the work mirror cannot mutate the staged snapshot.
     _run(["cp", "-al", str(mirror), str(staging / "ubuntu")])
-    _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
-    # stamp is for main archive Release file
-    _write_stamp(staging, primary_mtimes)
+    if ports_rsync_source:
+        _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
+    try:
+        _validate_indices(staging / "ubuntu", ports_enabled=bool(ports_rsync_source))
+    except (OSError, ValueError) as error:
+        logger.error("Archive snapshot validation failed: %s; keeping previous snapshot.", error)
+        shutil.rmtree(staging, ignore_errors=True)
+        return 1
+    _write_stamp(staging, primary, ports)
     snapshot = out / snapshot_name
     os.rename(staging, snapshot)
     swap_current(out, snapshot)

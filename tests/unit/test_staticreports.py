@@ -532,10 +532,15 @@ def test_configure_archive_mirror_writes_overrides(monkeypatch):
 
 
 def test_configure_archive_mirror_relinks_germinate_to_default_when_mirror_dir_empty(monkeypatch):
+    written = {}
     monkeypatch.setattr(
         staticreports.Path, "mkdir", lambda self, parents=True, exist_ok=True: None
     )
-    monkeypatch.setattr(staticreports.Path, "write_text", lambda self, text, encoding=None: None)
+    monkeypatch.setattr(
+        staticreports.Path,
+        "write_text",
+        lambda self, text, encoding=None: written.__setitem__(str(self), text),
+    )
     relinked = {}
     monkeypatch.setattr(
         staticreports, "_relink", lambda link, target: relinked.__setitem__(str(link), target)
@@ -545,6 +550,7 @@ def test_configure_archive_mirror_relinks_germinate_to_default_when_mirror_dir_e
     sr = staticreports.StaticReports()
 
     sr.configure_archive_mirror("", "", ports_rsync_source="")
+    assert written[staticreports.ARCHIVE_MIRROR_ENV_PATH] == "RSYNC_PORTS_SOURCE=\n"
     assert (
         relinked[str(staticreports.GERMINATE_WEB_PATH)]
         == f"{staticreports.DEFAULT_MIRROR_DIR}/germinate/current"

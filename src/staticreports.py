@@ -433,7 +433,8 @@ class StaticReports:
 
         The update-archive-mirror systemd unit reads these via EnvironmentFile, so
         updates take effect on the next run without rewriting the unit file.
-        Empty values are omitted so the script falls back to its own defaults.
+        Empty values are omitted so the script falls back to its own defaults,
+        except that an empty ports source explicitly disables ports mirroring.
 
         Also (re)points the germinate web path at <mirror_dir>/germinate/current,
         so nginx serves germinate's real (hardlink-friendly) storage under
@@ -444,7 +445,9 @@ class StaticReports:
             "RSYNC_PORTS_SOURCE": ports_rsync_source,
             "MIRROR_DIR": mirror_dir,
         }
-        content = "".join(f"{k}={v}\n" for k, v in overrides.items() if v)
+        content = "".join(
+            f"{k}={v}\n" for k, v in overrides.items() if v or k == "RSYNC_PORTS_SOURCE"
+        )
         env_file = Path(ARCHIVE_MIRROR_ENV_PATH)
         env_file.parent.mkdir(parents=True, exist_ok=True)
         env_file.write_text(content, encoding="utf-8")
