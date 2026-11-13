@@ -492,3 +492,20 @@ def test_malformed_release_date_fails_validation(mirror, tmp_path):
 
     with pytest.raises(ValueError, match="Invalid Date field"):
         mirror._read_release(release)
+
+
+def test_stale_unlisted_ports_indices_are_not_merged(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    _write_index(ports, "main/binary-powerpc/Packages.bz2", b"dropped architecture")
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: None)
+
+    assert mirror.sync_and_publish(out, "primary", "ports") == 0
+
+    dists = (out / "current").resolve() / "ubuntu" / "dists" / SUITE
+    assert (dists / "main/binary-arm64/Packages.gz").exists()
+    assert not (dists / "main/binary-powerpc").exists()
+

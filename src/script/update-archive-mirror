@@ -10,8 +10,10 @@ A new snapshot is only published when the archive Release identities changed.
 Ports-enabled candidates must cover the same suites and contain every listed gzip index.
 Primary-only candidates require all Sources.gz and primary-export architecture Packages.gz.
 All merged indices must match the primary Release, which describes ports architectures
-as well as primary ones. Dates guard against regression; different Releases are valid
-when their selected bytes are coherent. Rejected candidates leave current untouched.
+as well as primary ones; ports indices that Release does not list (stale leftovers of
+dropped architectures) are not merged. Dates guard against regression; different Releases
+are valid when their selected bytes are coherent. Rejected candidates leave current
+untouched.
 Most timer ticks exit cheaply after the rsync.  update-germinate is triggered
 on success via systemd OnSuccess=.
 
@@ -260,13 +262,17 @@ def _series_filters() -> list:
     return filters
 
 
-def _merge_ports_into_snapshot(snapshot_ubuntu: Path, ports_mirror: Path) -> None:
+def _merge_ports_into_snapshot(
+    snapshot_ubuntu: Path, ports_mirror: Path, primary: dict[str, ReleaseInfo]
+) -> None:
     """Hardlink the ports mirror's Packages indices into the snapshot's dists tree.
 
     The snapshot already contains the primary archive's tree (a hardlink
     copy made by cp -al); existing destinations are skipped, so ports
     only fills paths the primary does not publish. Ports' Release and
     Sources files are not taken; they describe a different archive.
+    Indices the primary Release does not list are skipped: ports can keep
+    stale files for architectures a suite has since dropped.
     """
     dists = ports_mirror / "dists"
     if not dists.is_dir():
@@ -276,6 +282,9 @@ def _merge_ports_into_snapshot(snapshot_ubuntu: Path, ports_mirror: Path) -> Non
         *dists.glob("*/*/debian-installer/binary-*/Packages*"),
     ]:
         rel = packages.relative_to(dists)
+        suite = rel.parts[0]
+        if suite not in primary or rel.relative_to(suite).as_posix() not in primary[suite].checksums:
+            continue
         dest = snapshot_ubuntu / "dists" / rel
         if dest.exists():
             continue
@@ -495,7 +504,7 @@ def _sync_and_publish_locked(
     # the work mirror cannot mutate the staged snapshot.
     _run(["cp", "-al", str(mirror), str(staging / "ubuntu")])
     if ports_rsync_source:
-        _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror)
+        _merge_ports_into_snapshot(staging / "ubuntu", ports_mirror, primary)
     try:
         _validate_indices(staging / "ubuntu", ports_enabled=bool(ports_rsync_source))
     except (OSError, ValueError) as error:
