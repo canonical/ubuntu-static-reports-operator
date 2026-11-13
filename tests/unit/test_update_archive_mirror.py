@@ -509,3 +509,76 @@ def test_stale_unlisted_ports_indices_are_not_merged(mirror, monkeypatch, tmp_pa
     assert (dists / "main/binary-arm64/Packages.gz").exists()
     assert not (dists / "main/binary-powerpc").exists()
 
+
+def test_lagging_ports_mirror_is_resynced_until_coherent(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    _write_index(ports, "main/binary-arm64/Packages.gz", b"previous arm64 packages")
+    syncs = 0
+
+    def ports_catch_up_on_second_sync(*args):
+        nonlocal syncs
+        syncs += 1
+        if syncs == 2:
+            _write_index(
+                ports, "main/binary-arm64/Packages.gz", INDICES["main/binary-arm64/Packages.gz"]
+            )
+
+    sleeps = []
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", ports_catch_up_on_second_sync)
+    monkeypatch.setattr(mirror.time, "sleep", sleeps.append)
+
+    assert mirror.sync_and_publish(out, "primary", "ports", attempts=3, retry_delay=60) == 0
+
+    assert syncs == 2
+    assert sleeps == [60]
+    assert len(list(out.glob("snapshot.*"))) == 1
+
+
+def test_retries_are_bounded(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    _write_index(ports, "main/binary-arm64/Packages.gz", b"never coherent")
+    syncs = []
+    sleeps = []
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: syncs.append(args))
+    monkeypatch.setattr(mirror.time, "sleep", sleeps.append)
+
+    assert mirror.sync_and_publish(out, "primary", "ports", attempts=3, retry_delay=5) == 1
+
+    assert len(syncs) == 3
+    assert sleeps == [5, 5]
+    assert not list(out.glob("snapshot.*"))
+    assert not list(out.glob(".staging.*"))
+
+
+def test_retries_stop_when_budget_is_exhausted(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    _write_index(ports, "main/binary-arm64/Packages.gz", b"never coherent")
+    clock = itertools.count(step=mirror.RETRY_BUDGET // 2)
+    syncs = []
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: syncs.append(args))
+    monkeypatch.setattr(mirror.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(mirror.time, "sleep", lambda seconds: None)
+
+    assert mirror.sync_and_publish(out, "primary", "ports", attempts=5, retry_delay=1) == 1
+
+    assert len(syncs) == 2
+
+
+def test_negative_retry_delay_is_rejected(mirror, monkeypatch):
+    with pytest.raises(SystemExit):
+        mirror.parse_args(["--retry-delay", "-1"])
+    monkeypatch.setenv("SYNC_RETRY_DELAY", "-1")
+    with pytest.raises(SystemExit):
+        mirror.parse_args([])

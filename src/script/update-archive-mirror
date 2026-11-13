@@ -13,7 +13,8 @@ All merged indices must match the primary Release, which describes ports archite
 as well as primary ones; ports indices that Release does not list (stale leftovers of
 dropped architectures) are not merged. Dates guard against regression; different Releases
 are valid when their selected bytes are coherent. Rejected candidates leave current
-untouched.
+untouched and are re-synced a bounded number of times, since the primary and ports
+mirrors briefly disagree after each publisher run.
 Most timer ticks exit cheaply after the rsync.  update-germinate is triggered
 on success via systemd OnSuccess=.
 
@@ -46,6 +47,10 @@ HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
 # Binary index directories exported by archive.ubuntu.com rather than ports.
 PRIMARY_BINARY_DIRS = frozenset({"binary-amd64", "binary-amd64v3", "binary-i386"})
 
+# No retry starts after this many seconds. A final attempt can still stall for two
+# rsync --timeout=1200 periods, which keeps the run within the unit's RuntimeMaxSec=2h.
+RETRY_BUDGET = 3600
+
 
 def _sd_notify(message: str) -> None:
     """Send one sd_notify(3) message; a no-op when not run from systemd."""
@@ -59,6 +64,13 @@ def _sd_notify(message: str) -> None:
     with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notifier:
         notifier.connect(socket_name)
         notifier.send(message.encode())
+
+
+def _non_negative_float(value: str) -> float:
+    number = float(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError(f"must be non-negative: {value}")
+    return number
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -88,6 +100,18 @@ def parse_args(argv=None) -> argparse.Namespace:
             "RSYNC_PORTS_SOURCE", "rsync://rsync.ports.ubuntu.com/ubuntu-ports/dists/"
         ),
         help="rsync source for the ports archive indices (merged into the same dists tree).",
+    )
+    parser.add_argument(
+        "--attempts",
+        type=int,
+        default=int(os.environ.get("SYNC_ATTEMPTS", "3")),
+        help="Sync attempts per run before giving up on an incoherent candidate.",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=_non_negative_float,
+        default=os.environ.get("SYNC_RETRY_DELAY", "300"),
+        help="Seconds to wait between sync attempts, letting lagging mirrors catch up.",
     )
     parser.add_argument(
         "--retention",
@@ -437,8 +461,10 @@ def sync_and_publish(
     ports_rsync_source: str,
     retention: int = 3,
     force: bool = False,
+    attempts: int = 1,
+    retry_delay: float = 0,
 ) -> int:
-    """Run one sync-and-publish cycle under the mirror lock."""
+    """Run sync-and-publish cycles under the mirror lock until one succeeds."""
     mirror = out / "work" / "ubuntu"
     mirror.mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)
@@ -452,9 +478,22 @@ def sync_and_publish(
 
         # Announce readiness now that this instance is the active worker.
         _sd_notify("READY=1")
-        return _sync_and_publish_locked(
-            out, archive_rsync_source, ports_rsync_source, retention, force
-        )
+        attempts = max(1, attempts)
+        start = time.monotonic()
+        for attempt in range(1, attempts + 1):
+            result = _sync_and_publish_locked(
+                out, archive_rsync_source, ports_rsync_source, retention, force
+            )
+            if result == 0 or attempt == attempts:
+                return result
+            if time.monotonic() - start + retry_delay > RETRY_BUDGET:
+                logger.info("Attempt %d/%d rejected; retry budget exhausted.", attempt, attempts)
+                return result
+            logger.info(
+                "Attempt %d/%d rejected; re-syncing in %gs.", attempt, attempts, retry_delay
+            )
+            time.sleep(retry_delay)
+        return result
 
 
 def _sync_and_publish_locked(
@@ -530,6 +569,8 @@ def main(argv=None) -> int:
         ports_rsync_source=args.ports_rsync_source,
         retention=args.retention,
         force=args.force,
+        attempts=args.attempts,
+        retry_delay=args.retry_delay,
     )
 
 
