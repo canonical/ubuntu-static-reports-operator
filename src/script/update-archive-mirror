@@ -68,8 +68,8 @@ def _sd_notify(message: str) -> None:
 
 def _non_negative_float(value: str) -> float:
     number = float(value)
-    if number < 0:
-        raise argparse.ArgumentTypeError(f"must be non-negative: {value}")
+    if not 0 <= number < float("inf"):
+        raise argparse.ArgumentTypeError(f"must be finite and non-negative: {value}")
     return number
 
 
