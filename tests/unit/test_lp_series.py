@@ -221,6 +221,39 @@ def test_germinate_ubuntu_proposed_germinates_launchpad_devel(monkeypatch, tmp_p
     assert calls == [("stonking-proposed", expected_ogre)]
 
 
+def test_germinate_arch_uses_only_suites_publishing_arch(monkeypatch, tmp_path):
+    # germinate is apt-only on the unit, absent from the dev venv
+    for module in ("", ".archive", ".germinator", ".log", ".seeds"):
+        monkeypatch.setitem(sys.modules, f"germinate{module}", MagicMock())
+    germinate = _load_script("germinate-ubuntu")
+    suite_archs = {
+        "trusty": ["amd64", "powerpc"],
+        "trusty-updates": ["amd64"],
+    }
+    monkeypatch.setattr(germinate, "_archs_from_release", lambda _, suite: suite_archs[suite])
+    tagfile = MagicMock(side_effect=lambda suites, *_, **__: suites)
+    monkeypatch.setattr(germinate, "TagFile", tagfile)
+    monkeypatch.setattr(germinate, "Germinator", lambda _: MagicMock())
+
+    for arch in ("powerpc", "amd64"):
+        germinate._germinate_arch(
+            "trusty",
+            germinate.COMPONENTS,
+            arch,
+            {},
+            "file:///archive",
+            str(tmp_path),
+            ["trusty", "trusty-updates"],
+            "release",
+            None,
+        )
+
+    assert [call.args[0] for call in tagfile.call_args_list] == [
+        ["trusty"],
+        ["trusty", "trusty-updates"],
+    ]
+
+
 def test_germinate_suite_raises_when_arch_child_fails(monkeypatch, tmp_path):
     # germinate is apt-only on the unit, absent from the dev venv
     for module in ("", ".archive", ".germinator", ".log", ".seeds"):
