@@ -297,8 +297,11 @@ def _germinate_arch(
 ) -> set[str]:
     """Germinate all flavours for one architecture. Runs in a forked child."""
     glog = logging.getLogger("germinate")
+    arch_suites = [suite for suite in suites if arch in _archs_from_release(archiveroot, suite)]
+    for skipped_suite in [suite for suite in suites if suite not in arch_suites]:
+        logging.info("Skipping %s for %s: architecture not listed in Release", skipped_suite, arch)
     germinator = Germinator(arch)
-    archive = TagFile(suites, components, arch, archiveroot, cleanup=True)
+    archive = TagFile(arch_suites, components, arch, archiveroot, cleanup=True)
     germinator.parse_archive(archive)
 
     seed_outputs: set[str] = set()
