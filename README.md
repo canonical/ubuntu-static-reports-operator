@@ -197,6 +197,10 @@ juju run ubuntu-static-reports/0 static-reports-diagnose
 juju run ubuntu-static-reports/0 static-reports-diagnose service=update-nbs
 ```
 
+`juju status` also summarizes persistent workload-health problems and points to
+that action. See [Automatic health in `juju status`](docs/operations.md#automatic-health-in-juju-status)
+for the two-sample anti-flapping behavior and Juju 3.6/4 compatibility.
+
 The underlying services and timers can also be inspected directly with
 `systemctl` and `journalctl`.
 

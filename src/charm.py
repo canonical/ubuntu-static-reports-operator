@@ -26,8 +26,16 @@ PORT = 80
 class UbuntuStaticReportsCharm(ops.CharmBase):
     """Charmed Operator for Ubuntu Static Reports."""
 
+    _stored = ops.StoredState()
+
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
+        self._stored.set_default(
+            health_candidate="",
+            health_candidate_count=0,
+            published_health_document=None,
+            health_status_message="",
+        )
 
         self.ingress = IngressRequirer(self, port=PORT, strip_prefix=True, relation_name="ingress")
 
@@ -41,6 +49,8 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
             self._on_static_reports_diagnose,
         )
         self.framework.observe(self.on.staticreports_storage_attached, self._on_storage_attached)
+        self.framework.observe(self.on.update_status, self._on_update_status)
+        self.framework.observe(self.on.collect_unit_status, self._on_collect_unit_status)
 
         framework.observe(self.ingress.on.ready, self._on_config_changed)
         framework.observe(self.ingress.on.revoked, self._on_config_changed)
@@ -224,6 +234,92 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         if report["outcome"] == "condition_skipped":
             event.fail(f"{service} was skipped: {report['reason']}")
             return
+
+    def _on_update_status(self, event: ops.UpdateStatusEvent):
+        """Refresh the cheap shared health snapshot without running reports."""
+        try:
+            document = health.HealthCollector().collect()
+        except (health.HealthCollectionError, OSError, ValueError) as error:
+            logger.warning("Could not collect workload health: %s", error)
+            document = {
+                "schema_version": health.SCHEMA_VERSION,
+                "generated_at": health.iso_time(),
+                "status": "unknown",
+                "summary": f"Could not collect health evidence: {error}",
+                "reports": [],
+                "serving": None,
+            }
+        self._record_health_document(document)
+
+    def _record_health_document(self, document: dict):
+        """Publish matching non-OK samples twice, but clear them on the first OK."""
+        status = document["status"]
+        if status == "ok":
+            self._stored.health_candidate = ""
+            self._stored.health_candidate_count = 0
+            self._stored.published_health_document = document
+            return
+        if self._stored.health_candidate == status:
+            self._stored.health_candidate_count += 1
+        else:
+            self._stored.health_candidate = status
+            self._stored.health_candidate_count = 1
+        if self._stored.health_candidate_count >= 2:
+            self._stored.published_health_document = document
+
+    def _on_collect_unit_status(self, event: ops.CollectStatusEvent):
+        """Reconcile lifecycle status with the latest published health summary."""
+        lifecycle_status = self.unit.status
+        health_status = self._published_health_status()
+        health_generated = (
+            lifecycle_status.name in {"active", "blocked"}
+            and health_status is not None
+            and lifecycle_status.message == self._stored.health_status_message
+        )
+        preserve_lifecycle = not health_generated and (
+            lifecycle_status.name in {"blocked", "maintenance", "waiting"}
+            or (
+                lifecycle_status.name == "active"
+                and self._stored.published_health_document is None
+            )
+            or (
+                lifecycle_status.name == "active"
+                and bool(lifecycle_status.message)
+                and not health_generated
+            )
+        )
+        if preserve_lifecycle:
+            event.add_status(lifecycle_status)
+        if health_status:
+            event.add_status(health_status)
+            self._stored.health_status_message = health_status.message
+        else:
+            self._stored.health_status_message = ""
+
+    def _published_health_status(self):
+        document = self._stored.published_health_document
+        if document is None:
+            return None
+        status = document["status"]
+        if status == "ok":
+            return ops.ActiveStatus()
+        if status == "waiting":
+            return ops.ActiveStatus("Authenticated reports waiting for Launchpad credentials.")
+        if status == "unknown":
+            return ops.ActiveStatus("Report health unknown; run static-reports-diagnose.")
+        attention = sum(report["status"] != "ok" for report in document["reports"])
+        if serving := document.get("serving"):
+            attention += serving["status"] != "ok"
+        noun = "check" if attention == 1 else "checks"
+        verb = "needs" if attention == 1 else "need"
+        if status == "critical":
+            return ops.BlockedStatus(
+                f"Local workload critical: {attention} {noun} {verb} attention; "
+                "run static-reports-diagnose."
+            )
+        return ops.ActiveStatus(
+            f"Degraded: {attention} {noun} {verb} attention; run static-reports-diagnose."
+        )
 
     def _get_external_url(self) -> str:
         """Report URL to access Ubuntu Static Reports."""

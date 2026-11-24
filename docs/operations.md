@@ -66,6 +66,34 @@ unhealthy result is a completed diagnostic action, not an action failure.
 Invalid parameters or an inability to collect evidence fail the action. The
 action is read-only and does not start, stop, restart, or regenerate reports.
 
+## Automatic health in `juju status`
+
+The charm also handles Juju's periodic `update-status` event. Juju normally emits
+it every five minutes; the model-wide `update-status-hook-interval` setting can
+change that cadence. The charm refreshes only the cheap shared health snapshot
+and then uses Ops' `collect_unit_status` event to reconcile it with setup,
+configuration, and maintenance state. This is independent of COS and remains
+available through the same APIs in Juju 3.6 and Juju 4.
+
+Two matching non-OK samples are required before publishing a new degraded,
+unknown, or critical health state. The first healthy sample clears a previous
+health message immediately. Existing setup and configuration messages retain
+their normal priority.
+
+- Healthy reports produce ordinary `active` status with no health message.
+- Degraded reports produce an `active` message directing the operator to
+  `static-reports-diagnose`.
+- Missing optional Launchpad credentials leave authenticated reports waiting
+  with an explanatory `active` message.
+- Persistent critical local workload health produces `blocked` status with the
+  diagnostic action as the next step.
+
+Periodic checks never run reports, perform recovery, search journals, contact
+Launchpad, probe external addresses, or inspect network routes. They use bounded
+systemd properties, small outcome/state files, fixed output checks, and the
+loopback nginx probe. Full history and future alerting belong to COS, not Juju
+status messages.
+
 ## Targeted recovery with `run-report`
 
 `run-report` synchronously runs exactly one report service:
