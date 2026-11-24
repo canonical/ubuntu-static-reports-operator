@@ -42,8 +42,6 @@ logger = logging.getLogger("update-mismatches")
 #    elsewhere, so we symlink them at each snapshot instead (see _relink).
 #  - ~/.update-mismatches.lock and ~/.update-mismatches.state: this script's
 #    own per-run lock and last-processed-snapshot marker.
-#  - ~/.config/lp-ubuntu-archive-unprivileged-bot.oauth: the Launchpad
-#    credentials file the charm writes for these tools to authenticate with.
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
 
 
@@ -228,10 +226,7 @@ def _tool_env(cfg: Config) -> dict:
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH")
     env["PYTHONPATH"] = f"{cfg.uat}{os.pathsep}{pythonpath}" if pythonpath else str(cfg.uat)
-    env.setdefault(
-        "LP_CREDENTIALS_FILE",
-        str(HOME / ".config/lp-ubuntu-archive-unprivileged-bot.oauth"),
-    )
+    env.pop("LP_CREDENTIALS_FILE", None)
     return env
 
 

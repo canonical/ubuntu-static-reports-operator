@@ -103,6 +103,7 @@ from various sources depending on the respective service.
   * Execution time: usually <=15 minutes (2h timeout)
   * Code: wrapper `update-mismatches` is included in this charm; the mismatch reports themselves come from https://git.launchpad.net/ubuntu-archive-tools
   * Data: Current germinate snapshot (which already includes the archive indices)
+  * Credentials: none; Launchpad queries are anonymous
   * Old location: https://ubuntu-archive-team.ubuntu.com/ \*-mismatches.\*
   * New location: https://static-reports.ubuntu.com/mismatches/
 

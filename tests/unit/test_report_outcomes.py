@@ -161,3 +161,14 @@ def test_lock_contention_is_recorded(mismatch, monkeypatch, tmp_path):
     )
     assert mismatch.generate_reports(cfg) == 0
     assert outcomes == ["locked"]
+
+
+def test_mismatches_does_not_use_launchpad_credentials(mismatch, monkeypatch):
+    monkeypatch.setenv("LP_CREDENTIALS_FILE", "/tmp/must-not-be-propagated")
+    environment = mismatch._tool_env(SimpleNamespace(uat=Path("/uat")))
+    assert "LP_CREDENTIALS_FILE" not in environment
+    unit = (
+        Path(__file__).parents[2] / "src" / "systemd" / "update-mismatches.service"
+    ).read_text()
+    assert "ConditionFileNotEmpty" not in unit
+    assert "lp-ubuntu-archive-unprivileged-bot.oauth" not in unit
