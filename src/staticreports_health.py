@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 SCHEMA_VERSION = 1
+MAX_OUTCOME_RECORD_SIZE = 64 * 1024
 DEFAULT_HEALTH_DIR = Path("/var/lib/staticreports/health")
 ARCHIVE_MIRROR_ENV_PATH = Path("/etc/staticreports/archive-mirror.env")
 DEFAULT_MIRROR_DIR = Path("/srv/staticreports")
@@ -671,7 +672,19 @@ class HealthCollector:
     def _record(self, name: str) -> tuple[dict[str, Any] | None, str]:
         path = self.health_dir / f"{name}.json"
         try:
-            record = json.loads(path.read_text(encoding="utf-8"))
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise OSError("outcome record is not a regular file")
+                if metadata.st_size > MAX_OUTCOME_RECORD_SIZE:
+                    raise OSError("outcome record exceeds the size limit")
+                content = os.read(descriptor, MAX_OUTCOME_RECORD_SIZE + 1)
+                if len(content) > MAX_OUTCOME_RECORD_SIZE:
+                    raise OSError("outcome record exceeds the size limit")
+            finally:
+                os.close(descriptor)
+            record = json.loads(content.decode("utf-8"))
         except FileNotFoundError:
             return None, ""
         except (OSError, UnicodeError, json.JSONDecodeError) as error:

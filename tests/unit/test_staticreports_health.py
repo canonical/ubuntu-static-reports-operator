@@ -4,6 +4,7 @@
 """Tests for the shared static report health model."""
 
 import json
+import os
 import re
 import subprocess
 import urllib.request
@@ -493,6 +494,41 @@ def test_malformed_outcome_document_becomes_evidence_error(tmp_path):
     record, error = collector._record("update-nbs")
     assert record is None
     assert "unsupported schema" in error
+
+
+def test_record_reader_rejects_oversized_records(tmp_path):
+    path = tmp_path / "update-nbs.json"
+    path.write_bytes(b"x" * (health.MAX_OUTCOME_RECORD_SIZE + 1))
+    collector = health.HealthCollector(health_dir=tmp_path)
+
+    record, error = collector._record("update-nbs")
+
+    assert record is None
+    assert "size limit" in error
+
+
+def test_record_reader_rejects_symlinks(tmp_path):
+    target = tmp_path / "target.json"
+    target.write_text("{}")
+    path = tmp_path / "update-nbs.json"
+    path.symlink_to(target)
+    collector = health.HealthCollector(health_dir=tmp_path)
+
+    record, error = collector._record("update-nbs")
+
+    assert record is None
+    assert "Could not read outcome record" in error
+
+
+def test_record_reader_rejects_fifo_without_blocking(tmp_path):
+    path = tmp_path / "update-nbs.json"
+    os.mkfifo(path)
+    collector = health.HealthCollector(health_dir=tmp_path)
+
+    record, error = collector._record("update-nbs")
+
+    assert record is None
+    assert "not a regular file" in error
 
 
 def test_seeded_output_must_be_a_nonempty_file(tmp_path):
