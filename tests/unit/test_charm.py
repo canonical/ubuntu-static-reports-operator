@@ -534,6 +534,33 @@ def test_config_changed_blocks_invalid_configured_secret_and_removes_stale_oauth
     )
 
 
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=PropertyMock,
+)
+def test_config_changed_rejects_blank_configured_secret(
+    lp_oauth_prop_mock, mock_clear_lpoauthkey, ctx
+):
+    lp_oauth_prop_mock.return_value = "   "
+    secret = Secret(
+        {"lpoauthkey": "   "},
+        id="secret:11111111111111111111",
+        remote_grants={1: {"ubuntu-static-reports"}},
+    )
+    state = State(
+        leader=True,
+        config={"lpuser_secret_id": "secret:11111111111111111111"},
+        secrets={secret},
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    mock_clear_lpoauthkey.assert_called_once_with()
+    assert out.unit_status == BlockedStatus(
+        "Launchpad oauth token is configured but unavailable or invalid."
+    )
+
+
 def test_config_changed_blocks_when_stale_oauth_cannot_be_removed(
     mock_clear_lpoauthkey, ctx, base_state
 ):
@@ -586,6 +613,22 @@ def test_lpuser_lp_oauthkey_property_returns_none_when_key_missing_from_secret()
     dummy = SimpleNamespace()
     fake_secret = MagicMock()
     fake_secret.get_content.return_value = {}
+    dummy._lpuser_secret = fake_secret
+    charm = cast(UbuntuStaticReportsCharm, dummy)
+
+    result = UbuntuStaticReportsCharm._lpuser_lp_oauthkey.fget(charm)
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ops.SecretNotFoundError(), ops.model.ModelError("refresh failed")],
+)
+def test_lpuser_lp_oauthkey_returns_none_when_secret_refresh_fails(error):
+    dummy = SimpleNamespace()
+    fake_secret = MagicMock()
+    fake_secret.get_content.side_effect = error
     dummy._lpuser_secret = fake_secret
     charm = cast(UbuntuStaticReportsCharm, dummy)
 

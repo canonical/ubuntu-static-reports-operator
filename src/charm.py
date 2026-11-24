@@ -83,8 +83,8 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
             logger.debug("config - got secret id %s, returning key lpoauthkey", secret)
             try:
                 return secret.get_content(refresh=True)["lpoauthkey"]
-            except KeyError:
-                logger.warning("lpoauthkey not found in lpuser secret.")
+            except (KeyError, ops.SecretNotFoundError, ops.model.ModelError) as error:
+                logger.warning("Could not read lpoauthkey from lpuser secret: %s", error)
 
         return None
 
@@ -159,6 +159,8 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         logger.debug("config change done - seeded-in-ubuntu-indexer overrides written")
 
         lp_key_data = self._lpuser_lp_oauthkey
+        if lp_key_data is not None and not lp_key_data.strip():
+            lp_key_data = None
         if lp_key_data is None:
             if not self._staticreports.clear_lpoauthkey():
                 self.unit.status = ops.BlockedStatus(
