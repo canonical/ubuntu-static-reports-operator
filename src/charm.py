@@ -8,6 +8,7 @@ import json
 import logging
 import shutil
 import socket
+from pathlib import Path
 from subprocess import CalledProcessError, SubprocessError
 
 import ops
@@ -183,11 +184,15 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
 
         self.unit.status = ops.ActiveStatus()
 
+    def _health_collector(self) -> health.HealthCollector:
+        mirror_dir = Path(str(self.config.get("mirror_dir", "") or health.DEFAULT_MIRROR_DIR))
+        return health.HealthCollector(mirror_dir=mirror_dir)
+
     def _on_static_reports_diagnose(self, event: ops.ActionEvent):
         """Return the shared local health document without changing workload state."""
         service = event.params.get("service") or None
         try:
-            document = health.HealthCollector().collect(service)
+            document = self._health_collector().collect(service)
         except (health.HealthCollectionError, OSError, ValueError) as error:
             event.fail(f"Could not collect health evidence: {error}")
             return
@@ -211,7 +216,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
                 f"Running {service}. This may take a while; use --background for long reports."
             )
             self._staticreports.run_report(service, restart=restart)
-            document = health.HealthCollector().collect(service)
+            document = self._health_collector().collect(service)
         except (ReportAlreadyRunningError, ValueError) as error:
             self.unit.status = ops.ActiveStatus()
             event.fail(str(error))
@@ -238,7 +243,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
     def _on_update_status(self, event: ops.UpdateStatusEvent):
         """Refresh the cheap shared health snapshot without running reports."""
         try:
-            document = health.HealthCollector().collect()
+            document = self._health_collector().collect()
         except (health.HealthCollectionError, OSError, ValueError) as error:
             logger.warning("Could not collect workload health: %s", error)
             document = {

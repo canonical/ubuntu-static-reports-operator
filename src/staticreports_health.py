@@ -22,6 +22,7 @@ from typing import Any, Callable
 
 SCHEMA_VERSION = 1
 DEFAULT_HEALTH_DIR = Path("/var/lib/staticreports/health")
+ARCHIVE_MIRROR_ENV_PATH = Path("/etc/staticreports/archive-mirror.env")
 DEFAULT_MIRROR_DIR = Path("/srv/staticreports")
 DEFAULT_WEB_ROOT = Path("/srv/staticreports/www")
 DEFAULT_HOME = Path("/home/ubuntu")
@@ -586,13 +587,27 @@ def _overall(statuses: list[str]) -> tuple[str, str]:
     return overall, summary
 
 
+def _configured_mirror_dir(config_path: Path) -> Path:
+    """Read the charm-managed mirror setting, falling back to its default."""
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return DEFAULT_MIRROR_DIR
+    for line in lines:
+        if line.startswith("MIRROR_DIR="):
+            value = line.split("=", 1)[1].strip()
+            return Path(value) if value else DEFAULT_MIRROR_DIR
+    return DEFAULT_MIRROR_DIR
+
+
 class HealthCollector:
     """Collect bounded local evidence and produce a versioned health document."""
 
     def __init__(
         self,
         *,
-        mirror_dir: Path = DEFAULT_MIRROR_DIR,
+        mirror_dir: Path | None = None,
+        config_path: Path = ARCHIVE_MIRROR_ENV_PATH,
         web_root: Path = DEFAULT_WEB_ROOT,
         home: Path = DEFAULT_HOME,
         health_dir: Path = DEFAULT_HEALTH_DIR,
@@ -600,7 +615,7 @@ class HealthCollector:
         runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
         http_probe: Callable[[], tuple[bool, str]] | None = None,
     ):
-        self.mirror_dir = mirror_dir
+        self.mirror_dir = mirror_dir or _configured_mirror_dir(config_path)
         self.web_root = web_root
         self.home = home
         self.health_dir = health_dir

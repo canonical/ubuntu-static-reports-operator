@@ -552,3 +552,17 @@ def test_single_service_collection_retains_parent_failure(monkeypatch):
     assert document["reports"][0]["service"] == "update-nbs"
     assert document["reports"][0]["outcome"] == "dependency_blocked"
     assert document["serving"] is None
+
+
+def test_mirror_dir_is_read_from_charm_environment(tmp_path):
+    mirror = tmp_path / "custom-mirror"
+    snapshot = mirror / "archive" / "snapshot.custom"
+    (snapshot / "ubuntu" / "dists").mkdir(parents=True)
+    (snapshot / "STAMP").write_text("Generated: test\n")
+    (mirror / "archive" / "current").symlink_to(snapshot.name)
+    config = tmp_path / "archive-mirror.env"
+    config.write_text(f"MIRROR_DIR={mirror}\n")
+    collector = health.HealthCollector(config_path=config, web_root=tmp_path / "www")
+
+    assert collector._outputs_present("update-archive-mirror") is True
+    assert collector._snapshots("update-archive-mirror") == ("snapshot.custom", "", "")

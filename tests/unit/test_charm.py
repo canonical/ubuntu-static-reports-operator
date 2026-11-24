@@ -298,6 +298,16 @@ def test_diagnose_action_returns_shared_document_for_all_services(
 
 
 @patch("charm.health.HealthCollector")
+def test_diagnose_action_uses_configured_mirror_directory(collector_class, ctx):
+    collector_class.return_value.collect.return_value = _diagnostic_document()
+    state = State(leader=True, config={"mirror_dir": "/srv/custom-mirror"})
+
+    ctx.run(ctx.on.action("static-reports-diagnose"), state)
+
+    collector_class.assert_called_once_with(mirror_dir=Path("/srv/custom-mirror"))
+
+
+@patch("charm.health.HealthCollector")
 def test_diagnose_action_forwards_service_and_returns_unhealthy_result(
     collector_class, ctx, base_state
 ):
