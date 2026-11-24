@@ -7,6 +7,7 @@ These tests only cover those methods that do not require internet access,
 and do not attempt to manipulate the underlying machine.
 """
 
+import json
 from subprocess import CalledProcessError
 from types import SimpleNamespace
 from typing import cast
@@ -29,6 +30,7 @@ from ops.testing import (
     TCPPort,
 )
 
+import staticreports_health as health
 from charm import UbuntuStaticReportsCharm
 
 
@@ -252,6 +254,58 @@ def test_start_event_blocks_charm_when_service_start_fails(start_mock, exception
         "Failed to start services. Check `juju debug-log` for details."
     )
     assert out.opened_ports == frozenset()
+
+
+def _diagnostic_document(status="ok"):
+    return {
+        "schema_version": 1,
+        "generated_at": "2026-11-24T12:00:00+00:00",
+        "status": status,
+        "summary": "test summary",
+        "reports": [
+            {
+                "service": "update-nbs",
+                "status": status,
+                "outcome": "published" if status == "ok" else "failed",
+                "reason": "test reason",
+            }
+        ],
+        "serving": {"status": "ok", "reason": "probe passed"},
+    }
+
+
+@patch("charm.health.HealthCollector")
+def test_diagnose_action_returns_shared_document_for_all_services(
+    collector_class, ctx, base_state
+):
+    collector_class.return_value.collect.return_value = _diagnostic_document()
+    out = ctx.run(ctx.on.action("static-reports-diagnose"), base_state)
+    collector_class.return_value.collect.assert_called_once_with(None)
+    assert ctx.action_results["schema-version"] == "1"
+    assert ctx.action_results["status"] == "ok"
+    assert json.loads(ctx.action_results["report"])["reports"][0]["service"] == "update-nbs"
+    assert out.unit_status == base_state.unit_status
+
+
+@patch("charm.health.HealthCollector")
+def test_diagnose_action_forwards_service_and_returns_unhealthy_result(
+    collector_class, ctx, base_state
+):
+    collector_class.return_value.collect.return_value = _diagnostic_document("critical")
+    ctx.run(
+        ctx.on.action("static-reports-diagnose", params={"service": "update-nbs"}),
+        base_state,
+    )
+    collector_class.return_value.collect.assert_called_once_with("update-nbs")
+    assert ctx.action_results["status"] == "critical"
+
+
+@patch("charm.health.HealthCollector")
+def test_diagnose_action_fails_only_when_collection_fails(collector_class, ctx, base_state):
+    collector_class.return_value.collect.side_effect = health.HealthCollectionError("no systemctl")
+    with pytest.raises(ops.testing.ActionFailed) as failure:
+        ctx.run(ctx.on.action("static-reports-diagnose"), base_state)
+    assert "no systemctl" in failure.value.message
 
 
 @patch("charm.StaticReports.refresh_report")

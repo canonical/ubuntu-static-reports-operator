@@ -47,7 +47,26 @@ upstream dependency state, but omits the nginx result.
 Use `static-reports-diagnose --help` for a short usage summary, exit codes, and a
 link to this document. Help does not perform health checks.
 
-### Exit codes
+## Juju diagnostic action
+
+The Juju action has the same name, default, service selection, and health
+semantics as the installed CLI:
+
+```bash
+# All reports and local nginx:
+juju run ubuntu-static-reports/0 static-reports-diagnose
+
+# One report and its upstream dependency state:
+juju run ubuntu-static-reports/0 static-reports-diagnose service=update-nbs
+```
+
+The action returns `schema-version`, `generated-at`, `status`, `summary`, and a
+`report` string containing the same JSON document as `--format json`. An
+unhealthy result is a completed diagnostic action, not an action failure.
+Invalid parameters or an inability to collect evidence fail the action. The
+action is read-only and does not start, stop, restart, or regenerate reports.
+
+## CLI exit codes
 
 | Code | Meaning |
 |---|---|
@@ -59,7 +78,7 @@ link to this document. Help does not perform health checks.
 A collected warning or critical result is not a command execution error. It is a
 valid diagnostic result and is rendered in the requested format.
 
-### Health and outcome meanings
+## Health and outcome meanings
 
 Health is separate from the latest normal outcome:
 
@@ -92,7 +111,7 @@ accuracy slack. These conservative thresholds are diagnostic heuristics, not
 per-report service-level objectives. Runtime checks use the actual two-hour or
 eight-hour systemd limits. No recovery is triggered by these checks.
 
-### JSON document
+## JSON document
 
 The top-level document contains `schema_version`, `generated_at`, `status`,
 `summary`, `reports`, and `serving`. Each report contains its service name,
@@ -104,7 +123,7 @@ The document is shared by the CLI and the Juju diagnostic action. It is also the
 intended input to the cached exporter described in
 `handover-and-plan-for-cos.md`.
 
-### Follow-up commands
+## Follow-up commands
 
 For a failed report, inspect its workload journal, for example:
 

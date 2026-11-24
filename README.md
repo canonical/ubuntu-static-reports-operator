@@ -183,7 +183,13 @@ To refresh the report, you can use the provided Juju [Action](https://documentat
 For a consolidated read-only health check, use `static-reports-diagnose` on the
 unit. It checks all reports and local nginx by default, supports
 `--service <name>` and `--format json`, and documents its output and exit codes
-in [Operating Ubuntu Static Reports](docs/operations.md).
+in [Operating Ubuntu Static Reports](docs/operations.md). The same check is
+available as a Juju action:
+
+```bash
+juju run ubuntu-static-reports/0 static-reports-diagnose
+juju run ubuntu-static-reports/0 static-reports-diagnose service=update-nbs
+```
 
 The underlying services and timers can also be inspected directly with
 `systemctl` and `journalctl`.

@@ -4,6 +4,7 @@
 
 """Charmed Operator for Ubuntu Static Reports."""
 
+import json
 import logging
 import shutil
 import socket
@@ -14,6 +15,7 @@ from charmlibs.apt import PackageError, PackageNotFoundError
 from charms.operator_libs_linux.v1.systemd import SystemdError
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer as IngressRequirer
 
+import staticreports_health as health
 from staticreports import StaticReports
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,10 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         self.framework.observe(self.on.upgrade_charm, self._on_install)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.refresh_action, self._on_refresh_report)
+        self.framework.observe(
+            self.on["static-reports-diagnose"].action,
+            self._on_static_reports_diagnose,
+        )
         self.framework.observe(self.on.staticreports_storage_attached, self._on_storage_attached)
 
         framework.observe(self.ingress.on.ready, self._on_config_changed)
@@ -158,6 +164,24 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         logger.debug("config change done - lp oauth key set")
 
         self.unit.status = ops.ActiveStatus()
+
+    def _on_static_reports_diagnose(self, event: ops.ActionEvent):
+        """Return the shared local health document without changing workload state."""
+        service = event.params.get("service") or None
+        try:
+            document = health.HealthCollector().collect(service)
+        except (health.HealthCollectionError, OSError, ValueError) as error:
+            event.fail(f"Could not collect health evidence: {error}")
+            return
+        event.set_results(
+            {
+                "schema-version": str(document["schema_version"]),
+                "generated-at": document["generated_at"],
+                "status": document["status"],
+                "summary": document["summary"],
+                "report": json.dumps(document, sort_keys=True, separators=(",", ":")),
+            }
+        )
 
     def _on_refresh_report(self, event: ops.ActionEvent):
         """Refresh all reports."""
