@@ -27,6 +27,7 @@ from ops.testing import (
     Context,
     Network,
     Relation,
+    Secret,
     State,
     TCPPort,
 )
@@ -64,6 +65,13 @@ def mock_configure_mismatches():
 def mock_configure_seeded_in_ubuntu_index():
     """Stub configure_seeded_in_ubuntu_indexer so unit tests never write to the host."""
     with patch("charm.StaticReports.configure_seeded_in_ubuntu_indexer") as mock:
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_clear_lpoauthkey():
+    """Prevent credential-removal tests from touching the host filesystem."""
+    with patch("charm.StaticReports.clear_lpoauthkey", return_value=True) as mock:
         yield mock
 
 
@@ -478,13 +486,52 @@ def test_get_external_url_prioritizes_ingress_url_over_binding(
     lpoauth_mock.assert_called()
 
 
-def test_config_changed_sets_active_message_when_lp_secret_not_configured(ctx, base_state):
-    """Without the optional LP token the charm stays active with a hint."""
+def test_config_changed_waits_and_removes_stale_oauth_when_secret_not_configured(
+    mock_clear_lpoauthkey, ctx, base_state
+):
     out = ctx.run(ctx.on.config_changed(), base_state)
 
+    mock_clear_lpoauthkey.assert_called_once_with()
     assert out.unit_status == ActiveStatus(
-        "Launchpad oauth token not configured - authenticated reports are disabled."
+        "Authenticated reports waiting for Launchpad credentials."
     )
+
+
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=PropertyMock,
+)
+def test_config_changed_blocks_invalid_configured_secret_and_removes_stale_oauth(
+    lp_oauth_prop_mock, mock_clear_lpoauthkey, ctx
+):
+    lp_oauth_prop_mock.return_value = None
+    secret = Secret(
+        {"lpoauthkey": "invalid"},
+        id="secret:11111111111111111111",
+        remote_grants={1: {"ubuntu-static-reports"}},
+    )
+    state = State(
+        leader=True,
+        config={"lpuser_secret_id": "secret:11111111111111111111"},
+        secrets={secret},
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    mock_clear_lpoauthkey.assert_called_once_with()
+    assert out.unit_status == BlockedStatus(
+        "Launchpad oauth token is configured but unavailable or invalid."
+    )
+
+
+def test_config_changed_blocks_when_stale_oauth_cannot_be_removed(
+    mock_clear_lpoauthkey, ctx, base_state
+):
+    mock_clear_lpoauthkey.return_value = False
+
+    out = ctx.run(ctx.on.config_changed(), base_state)
+
+    assert out.unit_status == BlockedStatus("Failed to remove stale Launchpad oauth token.")
 
 
 @patch("charm.StaticReports.configure_lpoauthkey")

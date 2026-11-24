@@ -424,6 +424,15 @@ class StaticReports:
         )
         return key_success
 
+    def clear_lpoauthkey(self) -> bool:
+        """Remove the charm-managed OAuth file without logging its contents."""
+        try:
+            Path(LP_OAUTH_KEY_PATH).unlink(missing_ok=True)
+        except OSError as e:
+            logger.error("Failed to remove Launchpad oauth token: %s", e)
+            return False
+        return True
+
     def configure_archive_mirror(
         self, archive_rsync_source: str, mirror_dir: str, ports_rsync_source: str
     ):

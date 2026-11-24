@@ -885,6 +885,21 @@ def test_configure_lpoauthkey_returns_false_on_write_errors(localpathmock, monke
         assert sr.configure_lpoauthkey("data") is False
 
 
+def test_clear_lpoauthkey_removes_only_charm_managed_file(monkeypatch):
+    unlink = Mock()
+    monkeypatch.setattr(staticreports.Path, "unlink", unlink)
+
+    assert StaticReports().clear_lpoauthkey() is True
+
+    unlink.assert_called_once_with(missing_ok=True)
+
+
+def test_clear_lpoauthkey_returns_false_on_removal_error(monkeypatch):
+    monkeypatch.setattr(staticreports.Path, "unlink", Mock(side_effect=PermissionError()))
+
+    assert StaticReports().clear_lpoauthkey() is False
+
+
 def test_sru_report_is_a_managed_static_report_service():
     assert "sru-report" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
 

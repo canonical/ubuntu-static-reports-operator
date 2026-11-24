@@ -149,12 +149,20 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
 
         lp_key_data = self._lpuser_lp_oauthkey
         if lp_key_data is None:
-            # The token is optional: without it only the authenticated reports
-            # are unavailable, everything else keeps working - no blocked state.
-            logger.warning("Launchpad credentials unavailable, unable to gather uploaders.")
-            self.unit.status = ops.ActiveStatus(
-                "Launchpad oauth token not configured - authenticated reports are disabled."
-            )
+            if not self._staticreports.clear_lpoauthkey():
+                self.unit.status = ops.BlockedStatus(
+                    "Failed to remove stale Launchpad oauth token."
+                )
+                return False
+            secret_id = str(self.config.get("lpuser_secret_id", "") or "").strip()
+            if secret_id:
+                self.unit.status = ops.BlockedStatus(
+                    "Launchpad oauth token is configured but unavailable or invalid."
+                )
+            else:
+                self.unit.status = ops.ActiveStatus(
+                    "Authenticated reports waiting for Launchpad credentials."
+                )
             return False
         else:
             logger.debug("config - got lpoauthkey (length %d)", len(lp_key_data))

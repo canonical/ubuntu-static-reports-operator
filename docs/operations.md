@@ -181,3 +181,19 @@ journalctl -eu update-nbs.service --no-pager
 
 Use `juju debug-log` for charm hook and action implementation errors, not as a
 replacement for the report services' journald output.
+
+## Launchpad credentials
+
+Only `permissions-report` and `packageset-report` require the OAuth credential
+from `lpuser_secret_id`. `update-mismatches` uses anonymous Launchpad access and
+does not consume or propagate that credential. No other report becomes
+credential-dependent through this lifecycle.
+
+When the secret configuration is unset or no usable credential is available,
+the charm removes its managed OAuth file. This prevents stale credentials from
+keeping the two authenticated reports enabled. With no secret configured, those
+reports remain in `waiting` and other reports continue normally. An explicitly
+configured but unavailable or malformed secret is invalid configuration and
+puts the charm into `blocked` state until an operator corrects it.
+
+Credential contents are never included in diagnostic output or logs.
