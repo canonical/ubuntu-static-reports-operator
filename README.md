@@ -180,9 +180,13 @@ To refresh the report, you can use the provided Juju [Action](https://documentat
 
 ## Checking a live worker node
 
-To analyze the status of all reports - when they ran or when they will run
-next, the log output of each and more - use systemctl as the are all systemd
-timers and services.
+For a consolidated read-only health check, use `static-reports-diagnose` on the
+unit. It checks all reports and local nginx by default, supports
+`--service <name>` and `--format json`, and documents its output and exit codes
+in [Operating Ubuntu Static Reports](docs/operations.md).
+
+The underlying services and timers can also be inspected directly with
+`systemctl` and `journalctl`.
 
 ```bash
 ❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report update-mismatches update-germinate update-nbs update-archive-mirror

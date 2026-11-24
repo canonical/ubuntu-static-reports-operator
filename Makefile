@@ -9,6 +9,7 @@ ALL := $(SRC) $(TESTS)
 PYTHON_SCRIPTS := $(SRC)/script/apply-germinate-backport \
 	$(SRC)/script/germinate-ubuntu \
 	$(SRC)/script/seeded-in-ubuntu-indexer \
+	$(SRC)/script/static-reports-diagnose \
 	$(SRC)/script/update-archive-mirror \
 	$(SRC)/script/update-germinate \
 	$(SRC)/script/update-mismatches \

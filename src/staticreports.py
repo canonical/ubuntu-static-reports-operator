@@ -337,6 +337,7 @@ class StaticReports:
             # lp_series.py must be in place before the scripts that import it.
             shutil.copy("src/script/lp_series.py", "/usr/bin")
             shutil.copy("src/staticreports_health.py", HEALTH_MODULE_INSTALL_PATH)
+            shutil.copy("src/script/static-reports-diagnose", "/usr/bin")
             shutil.copy("src/script/update-bugpatterns", "/usr/bin")
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
