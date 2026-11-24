@@ -64,14 +64,22 @@ def discover_series(seeds_dir: Path) -> list[str]:
     return sorted(series)
 
 
-def _germinate_archs(germinate_dir: Path) -> set[str]:
+def _expected_archs(germinate_dir: Path, series: str) -> tuple[bool, set[str]]:
+    """Derive supported architectures from the archive Release metadata."""
+    series_dir = germinate_dir / "archive" / "ubuntu" / "dists" / series
+    if not series_dir.is_dir():
+        return False, set()
+    release = series_dir / "Release"
+    try:
+        content = release.read_text(encoding="utf-8")
+    except OSError:
+        return True, set()
     archs = set()
-    seed_file_pattern = re.compile(r".+_([a-zA-Z0-9]+)$")
-    for entry in germinate_dir.iterdir():
-        m = seed_file_pattern.match(entry.name)
-        if m:
-            archs.add(m.group(1))
-    return archs
+    pattern = re.compile(r"/binary-([a-zA-Z0-9]+)/Packages(?:\.gz|\.xz|\.bz2)?(?:\s|$)")
+    for line in content.splitlines():
+        if match := pattern.search(line):
+            archs.add(match.group(1))
+    return True, archs
 
 
 def parse_package_list(path: Path) -> set[str]:
@@ -164,7 +172,14 @@ def build_index(
     if not flavors:
         logger.warning("No flavors found for series %s", series)
         if skipped is not None:
-            skipped.append({"series": series, "architecture": arch, "reason": "no flavors"})
+            skipped.append(
+                {
+                    "series": series,
+                    "architecture": arch,
+                    "reason": "no flavors",
+                    "expected": False,
+                }
+            )
         return {}
 
     logger.info("Found %d flavors: %s", len(flavors), ", ".join(flavors))
@@ -182,6 +197,7 @@ def build_index(
                         "architecture": arch,
                         "flavor": flavor,
                         "reason": "no germinate output",
+                        "expected": True,
                     }
                 )
             continue
@@ -308,28 +324,43 @@ def generate_indexes(cfg) -> int:
         return 0
     logger.info("Found series: %s", ", ".join(series_list))
 
-    archs = _germinate_archs(snapshot / "flat" / "release")
-    if not archs:
-        logger.warning("No architecture data found in %s", snapshot)
-        health.record_outcome(
-            "seeded-in-ubuntu-indexer",
-            "missing_input",
-            f"No architecture data found in {snapshot}.",
-            input_snapshot=snapshot_id,
-            details={"complete": False, "written": [], "skipped": []},
-        )
-        return 0
-    logger.info("Found architectures: %s", ", ".join(sorted(archs)))
-
     written = []
     skipped = []
     for series in series_list:
-        for arch in sorted(archs):
+        supported, series_archs = _expected_archs(snapshot, series)
+        if not supported:
+            logger.info("Series %s is not present in this archive; skipping.", series)
+            skipped.append(
+                {
+                    "series": series,
+                    "reason": "unsupported series",
+                    "expected": True,
+                }
+            )
+            continue
+        if not series_archs:
+            logger.warning("No Release architecture metadata for %s.", series)
+            skipped.append(
+                {
+                    "series": series,
+                    "reason": "missing Release architecture metadata",
+                    "expected": False,
+                }
+            )
+            continue
+        for arch in sorted(series_archs):
             logger.info("\nBuilding index for %s/%s...", series, arch)
             index = build_index(series, arch, seeds_dir, snapshot, skipped)
             if not index:
                 logger.warning("No data for %s/%s, skipping.", series, arch)
-                skipped.append({"series": series, "architecture": arch, "reason": "no data"})
+                skipped.append(
+                    {
+                        "series": series,
+                        "architecture": arch,
+                        "reason": "no data",
+                        "expected": False,
+                    }
+                )
                 continue
 
             output_path = cfg.output_dir / ("seeded-%s-%s.json.gz" % (series, arch))
@@ -342,7 +373,11 @@ def generate_indexes(cfg) -> int:
     logger.info(
         "Seeded-in-ubuntu indexes updated in %s from snapshot %s.", cfg.output_dir, snapshot_id
     )
-    details = {"complete": not skipped, "written": written, "skipped": skipped}
+    details = {
+        "complete": all(skip.get("expected", False) for skip in skipped),
+        "written": written,
+        "skipped": skipped,
+    }
     if written:
         health.record_outcome(
             "seeded-in-ubuntu-indexer",
