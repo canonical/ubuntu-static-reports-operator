@@ -66,6 +66,54 @@ unhealthy result is a completed diagnostic action, not an action failure.
 Invalid parameters or an inability to collect evidence fail the action. The
 action is read-only and does not start, stop, restart, or regenerate reports.
 
+## Targeted recovery with `run-report`
+
+`run-report` synchronously runs exactly one report service:
+
+```bash
+juju run ubuntu-static-reports/0 run-report service=update-nbs
+```
+
+The `service` parameter is required and accepts one of the twelve report service
+names listed by `static-reports-diagnose --help`. There is no all-report mode and
+no `force` option. Normal unchanged-input and already-processed checks still
+apply. Declared systemd `OnSuccess=` dependencies may trigger downstream reports
+after an upstream service succeeds.
+
+The action refuses to interrupt an active service. Only use the following form
+when intentionally interrupting and restarting that service, for example after
+diagnosing a stuck invocation:
+
+```bash
+juju run ubuntu-static-reports/0 run-report service=update-mismatches restart=true
+```
+
+Some reports can take hours. Run long jobs in the background:
+
+```bash
+juju run --background ubuntu-static-reports/0 run-report service=sru-report
+```
+
+The command returns a Juju task ID. Inspect it with `juju show-task <task-id>`.
+After completion, use `static-reports-diagnose` to inspect the selected report's
+health. Action results distinguish the execution outcome from the resulting
+report health. Actual start/restart errors and credential-condition skips fail
+the action; a valid no-change result does not.
+
+The former all-report `refresh` action was removed. It did not actually bypass
+unchanged-input checks and could hide failures. Migrate old commands as follows:
+
+```bash
+# Old, removed:
+# juju run ubuntu-static-reports/0 refresh
+
+# New: select one report explicitly, optionally in the background:
+juju run ubuntu-static-reports/0 run-report service=update-seeds
+```
+
+Do not run the new action periodically from monitoring. It is an explicitly
+operator-requested workload mutation, separate from all diagnostic interfaces.
+
 ## CLI exit codes
 
 | Code | Meaning |

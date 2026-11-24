@@ -172,11 +172,16 @@ install, re-deploy and charm upgrades alike:
 If setting up or activating the swap file fails (e.g. not enough space on
 the root disk) the unit goes into blocked state.
 
-To refresh the report, you can use the provided Juju [Action](https://documentation.ubuntu.com/juju/3.6/howto/manage-actions/):
+To run one report, use the targeted Juju [action](https://documentation.ubuntu.com/juju/3.6/howto/manage-actions/):
 
 ```bash
-❯ juju run ubuntu-static-reports/0 refresh"
+❯ juju run ubuntu-static-reports/0 run-report service=update-seeds
 ```
+
+For long-running reports, use `juju run --background`. The action refuses to
+interrupt an active service unless `restart=true` is explicitly supplied. See
+[Targeted recovery with `run-report`](docs/operations.md#targeted-recovery-with-run-report)
+for details and migration from the removed `refresh` action.
 
 ## Checking a live worker node
 

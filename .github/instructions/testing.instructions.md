@@ -65,15 +65,15 @@ def test_setup_success_and_failure():  # Tests two things - split them
 **Always use Arrange-Act-Assert structure** to make tests scannable and predictable. Use blank lines to visually separate the three sections.
 
 ```python
-def test_refresh_report_starts_all_static_report_services(monkeypatch):
+def test_run_report_starts_only_the_selected_service(monkeypatch):
     starts = []
+    monkeypatch.setattr(staticreports.StaticReports, "_report_is_active", lambda self, unit: False)
     monkeypatch.setattr(staticreports.systemd, "service_start", lambda *args: starts.append(args))
     sr = staticreports.StaticReports()
-    
-    sr.refresh_report()
-    
-    for svc in staticreports.UBUNTU_STATIC_REPORT_SERVICES:
-        assert any(call for call in starts if svc + ".service" in call)
+
+    sr.run_report("update-nbs")
+
+    assert starts == [("update-nbs.service",)]
 ```
 
 ### Structure Guidelines

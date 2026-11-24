@@ -16,7 +16,7 @@ from charms.operator_libs_linux.v1.systemd import SystemdError
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer as IngressRequirer
 
 import staticreports_health as health
-from staticreports import StaticReports
+from staticreports import ReportAlreadyRunningError, StaticReports
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         self.framework.observe(self.on.start, self._on_start)
         self.framework.observe(self.on.upgrade_charm, self._on_install)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
-        self.framework.observe(self.on.refresh_action, self._on_refresh_report)
+        self.framework.observe(self.on["run-report"].action, self._on_run_report)
         self.framework.observe(
             self.on["static-reports-diagnose"].action,
             self._on_static_reports_diagnose,
@@ -183,20 +183,39 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
             }
         )
 
-    def _on_refresh_report(self, event: ops.ActionEvent):
-        """Refresh all reports."""
-        self.unit.status = ops.MaintenanceStatus("Refreshing the report")
-
+    def _on_run_report(self, event: ops.ActionEvent):
+        """Run one report, or explicitly interrupt and restart it."""
+        service = str(event.params["service"])
+        restart = bool(event.params.get("restart", False))
+        self.unit.status = ops.MaintenanceStatus(f"Running {service}")
         try:
-            event.log("Refreshing the report")
-            self._staticreports.refresh_report()
-        except (CalledProcessError, IOError):
-            event.log("Report refresh failed")
-            self.unit.status = ops.ActiveStatus(
-                "Failed to refresh the report. Check `juju debug-log` for details."
+            event.log(
+                f"Running {service}. This may take a while; use --background for long reports."
             )
+            self._staticreports.run_report(service, restart=restart)
+            document = health.HealthCollector().collect(service)
+        except (ReportAlreadyRunningError, ValueError) as error:
+            self.unit.status = ops.ActiveStatus()
+            event.fail(str(error))
+            return
+        except (SubprocessError, SystemdError, IOError, health.HealthCollectionError) as error:
+            self.unit.status = ops.ActiveStatus()
+            event.fail(f"Failed to run {service}: {error}")
             return
         self.unit.status = ops.ActiveStatus()
+        report = document["reports"][0]
+        event.set_results(
+            {
+                "service": service,
+                "status": report["status"],
+                "outcome": report["outcome"],
+                "reason": report["reason"],
+                "report": json.dumps(document, sort_keys=True, separators=(",", ":")),
+            }
+        )
+        if report["outcome"] == "condition_skipped":
+            event.fail(f"{service} was skipped: {report['reason']}")
+            return
 
     def _get_external_url(self) -> str:
         """Report URL to access Ubuntu Static Reports."""

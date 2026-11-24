@@ -8,7 +8,8 @@ and do not attempt to manipulate the underlying machine.
 """
 
 import json
-from subprocess import CalledProcessError
+from pathlib import Path
+from subprocess import CalledProcessError, TimeoutExpired
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -32,6 +33,7 @@ from ops.testing import (
 
 import staticreports_health as health
 from charm import UbuntuStaticReportsCharm
+from staticreports import ReportAlreadyRunningError
 
 
 @pytest.fixture
@@ -308,28 +310,74 @@ def test_diagnose_action_fails_only_when_collection_fails(collector_class, ctx, 
     assert "no systemctl" in failure.value.message
 
 
-@patch("charm.StaticReports.refresh_report")
-def test_refresh_action_triggers_report_refresh_and_logs_message(
-    refresh_report_mock, ctx, base_state
+@patch("charm.health.HealthCollector")
+@patch("charm.StaticReports.run_report")
+def test_run_report_action_runs_one_service_and_returns_health(
+    run_report_mock, collector_class, ctx, base_state
 ):
-    out = ctx.run(ctx.on.action("refresh"), base_state)
-
-    assert ctx.action_logs == ["Refreshing the report"]
-    assert out.unit_status == ActiveStatus()
-    assert refresh_report_mock.called
-
-
-@patch("charm.StaticReports.refresh_report")
-def test_refresh_action_sets_status_message_when_refresh_fails(
-    refresh_report_mock, ctx, base_state
-):
-    refresh_report_mock.side_effect = CalledProcessError(1, "refresh")
-
-    out = ctx.run(ctx.on.action("refresh"), base_state)
-
-    assert out.unit_status == ActiveStatus(
-        "Failed to refresh the report. Check `juju debug-log` for details."
+    collector_class.return_value.collect.return_value = _diagnostic_document()
+    out = ctx.run(
+        ctx.on.action("run-report", params={"service": "update-nbs"}),
+        base_state,
     )
+    run_report_mock.assert_called_once_with("update-nbs", restart=False)
+    collector_class.return_value.collect.assert_called_once_with("update-nbs")
+    assert ctx.action_logs == [
+        "Running update-nbs. This may take a while; use --background for long reports."
+    ]
+    assert ctx.action_results["outcome"] == "published"
+    assert out.unit_status == ActiveStatus()
+
+
+@patch("charm.StaticReports.run_report")
+def test_run_report_action_refuses_unintended_interruption(run_report_mock, ctx, base_state):
+    run_report_mock.side_effect = ReportAlreadyRunningError(
+        "already running; restart=true required"
+    )
+    with pytest.raises(ops.testing.ActionFailed) as failure:
+        ctx.run(
+            ctx.on.action("run-report", params={"service": "update-nbs"}),
+            base_state,
+        )
+    assert "restart=true" in failure.value.message
+
+
+@patch("charm.StaticReports.run_report")
+@pytest.mark.parametrize(
+    "exception",
+    [SystemdError("start failed"), TimeoutExpired("systemctl", 10)],
+)
+def test_run_report_action_fails_on_service_operation_error(
+    run_report_mock, exception, ctx, base_state
+):
+    run_report_mock.side_effect = exception
+    with pytest.raises(ops.testing.ActionFailed) as failure:
+        ctx.run(
+            ctx.on.action("run-report", params={"service": "update-nbs"}),
+            base_state,
+        )
+    assert "Failed to run update-nbs" in failure.value.message
+
+
+@patch("charm.health.HealthCollector")
+@patch("charm.StaticReports.run_report")
+def test_run_report_action_fails_when_service_is_condition_skipped(
+    run_report_mock, collector_class, ctx, base_state
+):
+    document = _diagnostic_document("waiting")
+    document["reports"][0]["outcome"] = "condition_skipped"
+    collector_class.return_value.collect.return_value = document
+    with pytest.raises(ops.testing.ActionFailed) as failure:
+        ctx.run(
+            ctx.on.action(
+                "run-report",
+                params={"service": "permissions-report", "restart": True},
+            ),
+            base_state,
+        )
+    run_report_mock.assert_called_once_with("permissions-report", restart=True)
+    assert "skipped" in failure.value.message
+    assert ctx.action_results["outcome"] == "condition_skipped"
 
 
 @patch(

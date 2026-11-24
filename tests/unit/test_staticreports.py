@@ -247,26 +247,53 @@ def test_start_raises_when_systemd_service_start_fails(monkeypatch, exception):
         sr.start()
 
 
-def test_refresh_report_starts_all_static_report_services(monkeypatch):
+def test_run_report_starts_only_the_selected_service(monkeypatch):
     starts = []
+    monkeypatch.setattr(staticreports.StaticReports, "_report_is_active", lambda self, unit: False)
     monkeypatch.setattr(staticreports.systemd, "service_start", lambda *args: starts.append(args))
     sr = staticreports.StaticReports()
 
-    sr.refresh_report()
+    sr.run_report("update-nbs")
 
-    for svc in staticreports.UBUNTU_STATIC_REPORT_SERVICES:
-        assert any(call for call in starts if svc + ".service" in call)
+    assert starts == [("update-nbs.service",)]
 
 
-def test_refresh_report_raises_when_service_start_fails(monkeypatch):
-    def bad_start(*args):
-        raise CalledProcessError(2, "systemctl")
-
-    monkeypatch.setattr(staticreports.systemd, "service_start", bad_start)
+def test_run_report_refuses_to_interrupt_active_service(monkeypatch):
+    monkeypatch.setattr(staticreports.StaticReports, "_report_is_active", lambda self, unit: True)
+    start = Mock()
+    monkeypatch.setattr(staticreports.systemd, "service_start", start)
     sr = staticreports.StaticReports()
 
-    with pytest.raises(CalledProcessError):
-        sr.refresh_report()
+    with pytest.raises(staticreports.ReportAlreadyRunningError, match="restart=true"):
+        sr.run_report("update-nbs")
+    start.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "state,expected",
+    [("active", True), ("activating", True), ("deactivating", True), ("inactive", False)],
+)
+def test_report_is_active_covers_oneshot_state_changes(monkeypatch, state, expected):
+    run_mock = Mock(return_value=SimpleNamespace(stdout=f"{state}\n"))
+    monkeypatch.setattr(staticreports, "run", run_mock)
+
+    assert StaticReports()._report_is_active("update-nbs.service") is expected
+    assert run_mock.call_args.kwargs["timeout"] == 10
+
+
+def test_run_report_explicitly_restarts_selected_service(monkeypatch):
+    restarts = []
+    monkeypatch.setattr(staticreports.systemd, "service_restart", restarts.append)
+    sr = staticreports.StaticReports()
+
+    sr.run_report("sru-report", restart=True)
+
+    assert restarts == ["sru-report.service"]
+
+
+def test_run_report_rejects_unknown_service():
+    with pytest.raises(ValueError, match="Unknown static report service"):
+        staticreports.StaticReports().run_report("not-a-report")
 
 
 def test_setup_systemd_unit_writes_service_and_timer_with_proxy_environment(monkeypatch):
@@ -701,26 +728,15 @@ def test_setup_systemd_unit_enables_new_unit_without_checking_enabled_state(monk
     assert enabled and enabled[0][0] == "--now"
 
 
-def test_refresh_report_logs_stdout_when_service_start_fails(monkeypatch, caplog):
-    """Test error stdout logging on service start failure.
-
-    When systemd service_start fails, the error stdout should be logged for debugging.
-    """
-
-    def bad_start(name):
-        e = CalledProcessError(5, "systemctl")
-        e.stdout = b"failed output"
-        raise e
-
-    monkeypatch.setattr(staticreports.systemd, "service_start", bad_start)
-    sr = staticreports.StaticReports()
-    caplog.clear()
-
-    with caplog.at_level("DEBUG"):
-        with pytest.raises(CalledProcessError):
-            sr.refresh_report()
-
-    assert "failed output" in caplog.text
+def test_run_report_propagates_service_start_failure(monkeypatch):
+    monkeypatch.setattr(staticreports.StaticReports, "_report_is_active", lambda self, unit: False)
+    monkeypatch.setattr(
+        staticreports.systemd,
+        "service_start",
+        Mock(side_effect=CalledProcessError(5, "systemctl")),
+    )
+    with pytest.raises(CalledProcessError):
+        staticreports.StaticReports().run_report("update-nbs")
 
 
 def test_install_clones_git_repositories_into_configured_targets(monkeypatch, tmp_path):

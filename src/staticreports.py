@@ -20,6 +20,11 @@ from staticreports_health import SERVICE_NAMES
 
 logger = logging.getLogger(__name__)
 
+
+class ReportAlreadyRunningError(RuntimeError):
+    """Raised when a targeted run would interrupt an active report."""
+
+
 PACKAGES = [
     "distro-info",
     "germinate",
@@ -494,14 +499,32 @@ class StaticReports:
             env_file,
         )
 
-    def refresh_report(self):
-        """Refresh all the reports - wait for completion."""
-        try:
-            for service in UBUNTU_STATIC_REPORT_SERVICES:
-                systemd.service_start(service + ".service")
-        except CalledProcessError as e:
-            logger.debug("Refreshing of the tracker failed: %s", e.stdout)
-            raise
+    def _report_is_active(self, unit: str) -> bool:
+        """Return whether a oneshot is active, starting, or changing state."""
+        result = run(
+            ["systemctl", "show", unit, "--property=ActiveState", "--value"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        return result.stdout.strip() in {"active", "activating", "reloading", "deactivating"}
+
+    def run_report(self, service: str, restart: bool = False):
+        """Run one report synchronously, refusing unintended interruption."""
+        if service not in UBUNTU_STATIC_REPORT_SERVICES:
+            raise ValueError(f"Unknown static report service: {service}")
+        unit = f"{service}.service"
+        if restart:
+            logger.info("Explicitly restarting %s", unit)
+            systemd.service_restart(unit)
+            return
+        if self._report_is_active(unit):
+            raise ReportAlreadyRunningError(
+                f"{unit} is already running; use restart=true to interrupt it explicitly."
+            )
+        logger.info("Starting %s", unit)
+        systemd.service_start(unit)
 
     def setup_systemd_unit(self, service):  # noqa: C901
         """Set up the requested service and timer with proxy configuration."""
