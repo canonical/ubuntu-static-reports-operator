@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from charms.operator_libs_linux.v1.systemd import SystemdError
 
 import staticreports
 from staticreports import StaticReports
@@ -227,16 +228,20 @@ def test_start_restarts_nginx_and_starts_all_report_services(monkeypatch):
         )
 
 
-def test_start_raises_when_systemd_service_start_fails(monkeypatch):
+@pytest.mark.parametrize(
+    "exception",
+    [CalledProcessError(1, "systemctl"), SystemdError("systemctl failed")],
+)
+def test_start_raises_when_systemd_service_start_fails(monkeypatch, exception):
     monkeypatch.setattr(staticreports.systemd, "service_restart", lambda *args: None)
 
     def bad_start(*args):
-        raise CalledProcessError(1, "systemctl")
+        raise exception
 
     monkeypatch.setattr(staticreports.systemd, "service_start", bad_start)
     sr = staticreports.StaticReports()
 
-    with pytest.raises(CalledProcessError):
+    with pytest.raises(type(exception)):
         sr.start()
 
 
@@ -573,7 +578,11 @@ def test_seeded_in_ubuntu_indexer_is_a_registered_report_service():
     assert "seeded-in-ubuntu-indexer" in staticreports.UBUNTU_STATIC_REPORT_SERVICES
 
 
-def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
+@pytest.mark.parametrize(
+    "exception",
+    [CalledProcessError(3, "systemctl"), SystemdError("systemctl failed")],
+)
+def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch, exception):
     monkeypatch.setattr(staticreports.Path, "read_text", lambda self, encoding=None: "[Service]")
     monkeypatch.setattr(staticreports.Path, "write_text", lambda self, t, encoding=None: None)
     monkeypatch.setattr(
@@ -583,12 +592,12 @@ def test_setup_systemd_unit_raises_when_service_enable_fails(monkeypatch):
     monkeypatch.setenv("JUJU_CHARM_HTTP_PROXY", "http://p:1")
 
     def bad_enable(*args, **kwargs):
-        raise CalledProcessError(3, "systemctl")
+        raise exception
 
     monkeypatch.setattr(staticreports.systemd, "service_enable", bad_enable)
     sr = staticreports.StaticReports()
 
-    with pytest.raises(CalledProcessError):
+    with pytest.raises(type(exception)):
         sr.setup_systemd_unit("update-seeds")
 
 

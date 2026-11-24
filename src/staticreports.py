@@ -377,7 +377,7 @@ class StaticReports:
             for service in UBUNTU_STATIC_REPORT_SERVICES:
                 systemd.service_start(service + ".service", "--no-block")
                 logger.debug("%s service started", service)
-        except CalledProcessError as e:
+        except (CalledProcessError, systemd.SystemdError) as e:
             logger.error("Failed to start systemd services: %s", e)
             raise
 
@@ -560,7 +560,7 @@ class StaticReports:
             logger.debug("Enabling %s.timer", service)
             try:
                 systemd.service_enable("--now", f"{service}.timer")
-            except CalledProcessError as e:
+            except (CalledProcessError, systemd.SystemdError) as e:
                 logger.error("Failed to enable %s.timer: %s", service, e)
                 raise
         else:

@@ -103,7 +103,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
         self.unit.status = ops.MaintenanceStatus("Starting Static Reports")
         try:
             self._staticreports.start()
-        except CalledProcessError:
+        except (CalledProcessError, SystemdError):
             self.unit.status = ops.BlockedStatus(
                 "Failed to start services. Check `juju debug-log` for details."
             )

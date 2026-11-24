@@ -239,7 +239,10 @@ def test_start_event_opens_port_80_and_sets_active_status(start_mock, ctx, base_
 
 
 @patch("charm.StaticReports.start")
-@pytest.mark.parametrize("exception", [CalledProcessError(1, "foo")])
+@pytest.mark.parametrize(
+    "exception",
+    [CalledProcessError(1, "foo"), SystemdError("systemctl failed")],
+)
 def test_start_event_blocks_charm_when_service_start_fails(start_mock, exception, ctx, base_state):
     start_mock.side_effect = exception
 
