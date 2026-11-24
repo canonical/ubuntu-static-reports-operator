@@ -102,6 +102,29 @@ def test_coherent_primary_and_ports_snapshot_publishes(mirror, monkeypatch, tmp_
     assert "Ports-Release-SHA256-tenacious:" in stamp
 
 
+def test_publication_and_no_change_record_distinct_outcomes(mirror, monkeypatch, tmp_path):
+    out = tmp_path / "archive"
+    primary = out / "work" / "ubuntu"
+    ports = out / "work" / "ubuntu-ports"
+    _populate_work_trees(primary, ports)
+    monkeypatch.setattr(mirror, "HOME", tmp_path)
+    monkeypatch.setattr(mirror, "sync_archive", lambda *args: None)
+    outcomes = []
+    monkeypatch.setattr(
+        mirror.health,
+        "record_outcome",
+        lambda service, outcome, *args, **kwargs: outcomes.append((outcome, kwargs)),
+    )
+
+    assert mirror.sync_and_publish(out, "primary", "ports") == 0
+    assert outcomes[0][0] == "published"
+    assert outcomes[0][1]["output_snapshot"] == (out / "current").resolve().name
+
+    assert mirror.sync_and_publish(out, "primary", "ports") == 0
+    assert outcomes[1][0] == "unchanged"
+    assert outcomes[1][1]["output_snapshot"] == (out / "current").resolve().name
+
+
 def test_empty_ports_release_set_preserves_current(mirror, monkeypatch, tmp_path):
     out = tmp_path / "archive"
     primary = out / "work" / "ubuntu"

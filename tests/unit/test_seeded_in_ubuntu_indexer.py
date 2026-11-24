@@ -146,6 +146,36 @@ def test_generate_indexes_records_processed_snapshot(indexer, staging):
     assert (staging / ".state").read_text() == "snapshot.20250101T000000Z"
 
 
+def test_generate_indexes_records_written_and_skipped_cells(indexer, staging, monkeypatch):
+    health_dir = staging / "health"
+    monkeypatch.setenv("STATIC_REPORTS_HEALTH_DIR", str(health_dir))
+    monkeypatch.setenv("INVOCATION_ID", "first-run")
+    cfg = _config(indexer, staging)
+    indexer.generate_indexes(cfg)
+
+    record_path = health_dir / "seeded-in-ubuntu-indexer.json"
+    first = json.loads(record_path.read_text())
+    assert first["outcome"] == "published"
+    assert first["input_snapshot"] == "snapshot.20250101T000000Z"
+    assert first["details"]["complete"] is False
+    assert len(first["details"]["written"]) == 2
+    assert first["details"]["skipped"] == [
+        {
+            "series": "resolute",
+            "architecture": "arm64",
+            "flavor": "kubuntu",
+            "reason": "no germinate output",
+        }
+    ]
+
+    monkeypatch.setenv("INVOCATION_ID", "second-run")
+    indexer.generate_indexes(cfg)
+    second = json.loads(record_path.read_text())
+    assert second["outcome"] == "already_processed"
+    assert second["details"] == first["details"]
+    assert second["last_publication_at"] == first["last_publication_at"]
+
+
 def test_generate_indexes_skips_already_processed_snapshot(indexer, staging):
     cfg = _config(indexer, staging)
     indexer.generate_indexes(cfg)

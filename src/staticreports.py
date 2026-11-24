@@ -46,6 +46,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/mismatches"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/nbs"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/seeded-in-ubuntu"), "ubuntu", "ubuntu"),
+    (Path("/var/lib/staticreports/health"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 
@@ -70,6 +71,7 @@ LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oau
 ARCHIVE_MIRROR_ENV_PATH = "/etc/staticreports/archive-mirror.env"
 MISMATCHES_ENV_PATH = "/etc/staticreports/mismatches.env"
 SEEDED_IN_UBUNTU_INDEXER_ENV_PATH = "/etc/staticreports/seeded-in-ubuntu-indexer.env"
+HEALTH_MODULE_INSTALL_PATH = "/usr/lib/python3/dist-packages/staticreports_health.py"
 GERMINATE_BACKPORT_PATCH = Path(
     "/usr/local/share/staticreports/germinate-cross-flavour-blacklist.patch"
 )
@@ -334,6 +336,7 @@ class StaticReports:
             shutil.copy("src/script/apply-germinate-backport", "/usr/bin")
             # lp_series.py must be in place before the scripts that import it.
             shutil.copy("src/script/lp_series.py", "/usr/bin")
+            shutil.copy("src/staticreports_health.py", HEALTH_MODULE_INSTALL_PATH)
             shutil.copy("src/script/update-bugpatterns", "/usr/bin")
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")

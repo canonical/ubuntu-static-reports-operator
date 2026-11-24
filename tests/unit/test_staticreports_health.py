@@ -17,7 +17,9 @@ NOW = datetime(2026, 11, 24, 12, 0, tzinfo=timezone.utc)
 
 
 def _seconds(value: str) -> int:
-    amount = int(re.match(r"\d+", value).group())
+    match = re.match(r"\d+", value)
+    assert match is not None
+    amount = int(match.group())
     if value.endswith("min"):
         return amount * 60
     if value.endswith("h"):
@@ -91,9 +93,11 @@ def test_service_catalog_covers_every_report_and_matches_unit_timing():
             assert "TimeoutStartSec=2h" in service
         if spec.interval:
             timer = _unit(f"{name}.timer")
-            interval = re.search(r"OnUnitActiveSec=(\S+)", timer).group(1)
-            jitter = re.search(r"RandomizedDelaySec=(\S+)", timer).group(1)
-            assert spec.interval == _seconds(interval)
+            interval_match = re.search(r"OnUnitActiveSec=(\S+)", timer)
+            jitter_match = re.search(r"RandomizedDelaySec=(\S+)", timer)
+            assert interval_match is not None and jitter_match is not None
+            assert spec.interval == _seconds(interval_match.group(1))
+            jitter = jitter_match.group(1)
             assert spec.jitter == _seconds(jitter)
 
 
@@ -130,17 +134,68 @@ def test_record_outcome_writes_versioned_json_atomically(tmp_path, monkeypatch):
     monkeypatch.setenv("INVOCATION_ID", "systemd-invocation")
     assert health.record_outcome(
         "update-archive-mirror",
-        "unchanged",
-        "No archive changes.",
+        "published",
+        "Published an archive snapshot.",
         output_snapshot="snapshot.one",
         health_dir=tmp_path,
     )
     document = json.loads((tmp_path / "update-archive-mirror.json").read_text())
     assert document["schema_version"] == 1
     assert document["invocation_id"] == "systemd-invocation"
-    assert document["outcome"] == "unchanged"
+    assert document["outcome"] == "published"
     assert document["output_snapshot"] == "snapshot.one"
+    assert document["last_publication_at"] == document["finished_at"]
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_already_processed_preserves_publication_and_skip_details(tmp_path):
+    details = {"complete": False, "written": ["one.json.gz"], "skipped": [{"cell": "two"}]}
+    assert health.record_outcome(
+        "seeded-in-ubuntu-indexer",
+        "published",
+        input_snapshot="snapshot.one",
+        details=details,
+        health_dir=tmp_path,
+    )
+    first = json.loads((tmp_path / "seeded-in-ubuntu-indexer.json").read_text())
+    assert health.record_outcome(
+        "seeded-in-ubuntu-indexer",
+        "already_processed",
+        input_snapshot="snapshot.one",
+        health_dir=tmp_path,
+    )
+    second = json.loads((tmp_path / "seeded-in-ubuntu-indexer.json").read_text())
+    assert second["last_publication_at"] == first["last_publication_at"]
+    assert second["details"] == details
+
+
+def test_noop_preserves_initial_schema_publication_time(tmp_path):
+    initial = {
+        "schema_version": 1,
+        "service": "update-nbs",
+        "outcome": "published",
+        "finished_at": "2026-11-20T10:00:00+00:00",
+        "input_snapshot": "snapshot.one",
+        "details": {},
+    }
+    (tmp_path / "update-nbs.json").write_text(json.dumps(initial))
+    assert health.record_outcome(
+        "update-nbs",
+        "already_processed",
+        input_snapshot="snapshot.one",
+        health_dir=tmp_path,
+    )
+    updated = json.loads((tmp_path / "update-nbs.json").read_text())
+    assert updated["last_publication_at"] == initial["finished_at"]
+
+
+def test_direct_wrapper_invocation_does_not_write_system_health(tmp_path, monkeypatch):
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
+    monkeypatch.delenv("STATIC_REPORTS_HEALTH_DIR", raising=False)
+    system_dir = tmp_path / "must-not-be-created"
+    monkeypatch.setattr(health, "DEFAULT_HEALTH_DIR", system_dir)
+    assert not health.record_outcome("update-nbs", "published")
+    assert not system_dir.exists()
 
 
 def test_record_outcome_rejects_unknown_service(tmp_path):

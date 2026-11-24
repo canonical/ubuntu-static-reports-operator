@@ -24,6 +24,12 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import staticreports_health as health
+except ModuleNotFoundError:  # Allow direct execution from the source tree.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import staticreports_health as health
+
 logger = logging.getLogger("seeded-in-ubuntu-indexer")
 
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
@@ -146,13 +152,19 @@ def _record_processed(state_file: Path, snapshot_id: str) -> None:
 
 
 def build_index(
-    series: str, arch: str, seed_source: Path, germinate_dir: Path
+    series: str,
+    arch: str,
+    seed_source: Path,
+    germinate_dir: Path,
+    skipped: list | None = None,
 ) -> dict[str, list[list[str]]]:
-    """Build index."""
+    """Build index and optionally record inputs skipped for this cell."""
     logger.info("Discovering flavors for %s/%s...", series, arch)
     flavors = discover_flavors(seed_source, series)
     if not flavors:
         logger.warning("No flavors found for series %s", series)
+        if skipped is not None:
+            skipped.append({"series": series, "architecture": arch, "reason": "no flavors"})
         return {}
 
     logger.info("Found %d flavors: %s", len(flavors), ", ".join(flavors))
@@ -163,6 +175,15 @@ def build_index(
         seeds = parse_germinated_flavor(germinate_dir, flavor, series, arch)
         if not seeds:
             logger.warning("    No germinate output found for %s.%s/%s", flavor, series, arch)
+            if skipped is not None:
+                skipped.append(
+                    {
+                        "series": series,
+                        "architecture": arch,
+                        "flavor": flavor,
+                        "reason": "no germinate output",
+                    }
+                )
             continue
         for seed_name, packages in seeds.items():
             for pkg in packages:
@@ -230,15 +251,34 @@ def generate_indexes(cfg) -> int:
     snapshot = _resolve_snapshot(cfg.archive_root)
     if snapshot is None:
         logger.info("No germinate snapshot published at %s yet; nothing to do.", cfg.archive_root)
+        health.record_outcome(
+            "seeded-in-ubuntu-indexer",
+            "missing_input",
+            f"No germinate snapshot is published at {cfg.archive_root}.",
+            details={"complete": False, "written": [], "skipped": []},
+        )
         return 0
 
     snapshot_id = snapshot.name
     if not cfg.force and snapshot_id == _last_processed(cfg.state_file):
         logger.info("Snapshot %s already processed; nothing to do.", snapshot_id)
+        health.record_outcome(
+            "seeded-in-ubuntu-indexer",
+            "already_processed",
+            f"Snapshot {snapshot_id} was already processed.",
+            input_snapshot=snapshot_id,
+        )
         return 0
 
     if not ((snapshot / "flat" / "release").is_dir() and (snapshot / "flavours").is_dir()):
         logger.warning("Snapshot %s is missing some directories; nothing to do.", snapshot_id)
+        health.record_outcome(
+            "seeded-in-ubuntu-indexer",
+            "missing_input",
+            f"Snapshot {snapshot_id} is missing required directories.",
+            input_snapshot=snapshot_id,
+            details={"complete": False, "written": [], "skipped": []},
+        )
         return 0
 
     logger.info("Processing germinate snapshot %s.", snapshot_id)
@@ -246,37 +286,79 @@ def generate_indexes(cfg) -> int:
     seeds_dir = cfg.seeds_directory
     if not seeds_dir.is_dir():
         logger.warning("Seeds directory %s not found; nothing to do.", seeds_dir)
+        health.record_outcome(
+            "seeded-in-ubuntu-indexer",
+            "missing_input",
+            f"Seeds directory {seeds_dir} was not found.",
+            input_snapshot=snapshot_id,
+            details={"complete": False, "written": [], "skipped": []},
+        )
         return 0
 
     series_list = discover_series(seeds_dir)
     if not series_list:
         logger.warning("No series found in %s", seeds_dir)
+        health.record_outcome(
+            "seeded-in-ubuntu-indexer",
+            "missing_input",
+            f"No series found in {seeds_dir}.",
+            input_snapshot=snapshot_id,
+            details={"complete": False, "written": [], "skipped": []},
+        )
         return 0
     logger.info("Found series: %s", ", ".join(series_list))
 
     archs = _germinate_archs(snapshot / "flat" / "release")
     if not archs:
         logger.warning("No architecture data found in %s", snapshot)
+        health.record_outcome(
+            "seeded-in-ubuntu-indexer",
+            "missing_input",
+            f"No architecture data found in {snapshot}.",
+            input_snapshot=snapshot_id,
+            details={"complete": False, "written": [], "skipped": []},
+        )
         return 0
     logger.info("Found architectures: %s", ", ".join(sorted(archs)))
 
+    written = []
+    skipped = []
     for series in series_list:
         for arch in sorted(archs):
             logger.info("\nBuilding index for %s/%s...", series, arch)
-            index = build_index(series, arch, seeds_dir, snapshot)
+            index = build_index(series, arch, seeds_dir, snapshot, skipped)
             if not index:
                 logger.warning("No data for %s/%s, skipping.", series, arch)
+                skipped.append({"series": series, "architecture": arch, "reason": "no data"})
                 continue
 
             output_path = cfg.output_dir / ("seeded-%s-%s.json.gz" % (series, arch))
             with gzip.open(output_path, "wt", encoding="utf-8") as f:
                 json.dump(index, f, sort_keys=True)
+            written.append(output_path.name)
             logger.info("Wrote %s (%d packages)", output_path, len(index))
 
     _record_processed(cfg.state_file, snapshot_id)
     logger.info(
         "Seeded-in-ubuntu indexes updated in %s from snapshot %s.", cfg.output_dir, snapshot_id
     )
+    details = {"complete": not skipped, "written": written, "skipped": skipped}
+    if written:
+        health.record_outcome(
+            "seeded-in-ubuntu-indexer",
+            "published",
+            f"Wrote {len(written)} indexes; skipped {len(skipped)} cells.",
+            input_snapshot=snapshot_id,
+            details=details,
+        )
+    else:
+        health.record_outcome(
+            "seeded-in-ubuntu-indexer",
+            "missing_input",
+            "No indexes were generated from the available inputs.",
+            input_snapshot=snapshot_id,
+            details=details,
+        )
     return 0
 
 

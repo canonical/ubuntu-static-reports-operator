@@ -200,6 +200,22 @@ def parse_time(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def snapshot_name(path: Path) -> str:
+    """Return the resolved snapshot directory name, or an empty string if absent."""
+    try:
+        return path.resolve(strict=True).name if path.is_dir() else ""
+    except (OSError, RuntimeError):
+        return ""
+
+
+def _previous_outcome(path: Path) -> dict[str, Any]:
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return previous if isinstance(previous, dict) else {}
+
+
 def record_outcome(
     service: str,
     outcome: str,
@@ -214,27 +230,47 @@ def record_outcome(
     if service not in STRUCTURED_OUTCOME_SERVICES or outcome not in OUTCOMES:
         logger.error("Refusing invalid health outcome %s/%s", service, outcome)
         return False
+    if (
+        health_dir is None
+        and not os.environ.get("INVOCATION_ID")
+        and not os.environ.get("STATIC_REPORTS_HEALTH_DIR")
+    ):
+        # Direct developer invocations must not try to write the system directory.
+        return False
     directory = health_dir or Path(
         os.environ.get("STATIC_REPORTS_HEALTH_DIR", str(DEFAULT_HEALTH_DIR))
     )
+    outcome_path = directory / f"{service}.json"
+    previous = _previous_outcome(outcome_path)
+    finished_at = iso_time()
+    if (
+        details is None
+        and outcome == "already_processed"
+        and previous.get("input_snapshot") == input_snapshot
+    ):
+        details = previous.get("details", {})
+    previous_publication = previous.get("last_publication_at", "")
+    if not previous_publication and previous.get("outcome") == "published":
+        previous_publication = previous.get("finished_at", "")
     document = {
         "schema_version": SCHEMA_VERSION,
         "service": service,
         "invocation_id": os.environ.get("INVOCATION_ID", ""),
         "started_at": iso_time(_STARTED_AT),
-        "finished_at": iso_time(),
+        "finished_at": finished_at,
         "outcome": outcome,
         "reason": reason,
         "input_snapshot": input_snapshot,
         "output_snapshot": output_snapshot,
-        "details": details or {},
+        "last_publication_at": (finished_at if outcome == "published" else previous_publication),
+        "details": details if details is not None else {},
     }
     try:
         serialized = json.dumps(document, sort_keys=True)
         directory.mkdir(parents=True, exist_ok=True)
         temporary = directory / f".{service}.{os.getpid()}.tmp"
         temporary.write_text(serialized, encoding="utf-8")
-        os.replace(temporary, directory / f"{service}.json")
+        os.replace(temporary, outcome_path)
     except (OSError, TypeError, ValueError) as error:
         logger.warning("Could not record %s health outcome: %s", service, error)
         return False
@@ -418,8 +454,12 @@ def _structured_status(name: str, evidence: Evidence) -> dict:
     }
     if finished := parse_time(record.get("finished_at")):
         result["last_success_at"] = iso_time(finished)
-        if record["outcome"] == "published":
-            result["last_publication_at"] = iso_time(finished)
+    published_at = parse_time(record.get("last_publication_at"))
+    if published_at:
+        result["last_publication_at"] = iso_time(published_at)
+    elif record["outcome"] == "published" and finished:
+        # Compatibility with the initial outcome schema.
+        result["last_publication_at"] = iso_time(finished)
     if not evidence.outputs_present:
         result.update(status="critical", reason="Expected report output is missing or empty.")
         return result
@@ -635,6 +675,7 @@ class HealthCollector:
             or not isinstance(record.get("reason", ""), str)
             or not isinstance(record.get("input_snapshot", ""), str)
             or not isinstance(record.get("output_snapshot", ""), str)
+            or not isinstance(record.get("last_publication_at", ""), str)
         ):
             return None, "Outcome record has invalid field types."
         return record, ""
@@ -699,10 +740,7 @@ class HealthCollector:
 
     @staticmethod
     def _snapshot(path: Path) -> str:
-        try:
-            return path.resolve(strict=True).name if path.is_dir() else ""
-        except (OSError, RuntimeError):
-            return ""
+        return snapshot_name(path)
 
     @staticmethod
     def _stamp_input(snapshot_path: Path) -> str:

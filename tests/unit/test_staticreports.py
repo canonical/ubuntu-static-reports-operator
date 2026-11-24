@@ -157,6 +157,7 @@ def test_install_creates_srv_directories_and_copies_scripts(monkeypatch):
         staticreports.GERMINATE_BACKPORT_PATCH,
     ) in ops
     assert ("copy", "src/script/lp_series.py", "/usr/bin") in ops
+    assert ("copy", "src/staticreports_health.py", staticreports.HEALTH_MODULE_INSTALL_PATH) in ops
     assert ("copy", "src/script/update-bugpatterns", "/usr/bin") in ops
     assert ("copy", "src/script/update-sync-blocklist", "/usr/bin") in ops
     assert ("copy", "src/script/update-seeds", "/usr/bin") in ops
