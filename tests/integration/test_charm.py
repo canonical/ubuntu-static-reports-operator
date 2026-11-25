@@ -1,6 +1,7 @@
 # Copyright 2025 Canonical
 # See LICENSE file for licensing details.
 
+import json
 import os
 
 import jubilant
@@ -202,6 +203,57 @@ def test_onsuccess_services_are_enabled(juju: jubilant.Juju):
             "ubuntu-static-reports/0", f"systemctl is-enabled {service}.service"
         ).strip()
         assert state == "static", f"{service}.service is not static"
+
+
+def test_static_reports_diagnose_matches_cli_and_action(juju: jubilant.Juju):
+    """The installed CLI and Juju action expose the same health document.
+
+    The integration model intentionally points the archive source at an
+    unreachable local address, so an overall critical result is expected. The
+    CLI's non-zero diagnostic exit code must not be mistaken for an SSH
+    command failure.
+    """
+    unit = "ubuntu-static-reports/0"
+    cli_document = json.loads(juju.ssh(unit, "static-reports-diagnose --format json || true"))
+    task = juju.run(unit, "static-reports-diagnose", wait=60)
+    action_document = json.loads(task.results["report"])
+
+    assert cli_document["schema_version"] == action_document["schema_version"] == 1
+    assert cli_document["status"] == action_document["status"] == "critical"
+    assert len(cli_document["reports"]) == len(action_document["reports"]) == 12
+    assert {report["service"] for report in cli_document["reports"]} == {
+        report["service"] for report in action_document["reports"]
+    }
+    assert cli_document["serving"] is not None
+    assert action_document["serving"] is not None
+
+    selected = juju.run(
+        unit,
+        "static-reports-diagnose",
+        {"service": "update-sync-blocklist"},
+        wait=60,
+    )
+    selected_document = json.loads(selected.results["report"])
+    assert len(selected_document["reports"]) == 1
+    assert selected_document["reports"][0]["service"] == "update-sync-blocklist"
+    assert selected_document["serving"] is None
+
+
+def test_run_report_runs_only_selected_service(juju: jubilant.Juju):
+    """A targeted recovery completes and returns the selected report's health."""
+    task = juju.run(
+        "ubuntu-static-reports/0",
+        "run-report",
+        {"service": "update-sync-blocklist"},
+        wait=600,
+    )
+
+    assert task.results["service"] == "update-sync-blocklist"
+    assert task.results["status"] == "ok"
+    assert task.results["outcome"] == "published"
+    document = json.loads(task.results["report"])
+    assert len(document["reports"]) == 1
+    assert document["reports"][0]["service"] == "update-sync-blocklist"
 
 
 def test_swapfile_is_active_and_persistent(juju: jubilant.Juju):
