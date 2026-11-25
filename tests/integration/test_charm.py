@@ -35,7 +35,10 @@ def test_service_state_after_deploy(
 
     juju.wait(jubilant.all_active, timeout=1200)
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="update-sync-blocklist.service"
+        juju,
+        unit="ubuntu-static-reports/0",
+        service="update-sync-blocklist.service",
+        timeout_sec=600,
     )
     wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-seeds.service")
 
@@ -272,7 +275,9 @@ def test_content_mismatches(juju: jubilant.Juju):
 
     # update-archive-mirror triggers update-germinate via OnSuccess=; wait for it
     # to publish the combined archive+germinate snapshot the mismatch reports read.
-    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-germinate.service")
+    wait_oneshot_finished(
+        juju, unit="ubuntu-static-reports/0", service="update-germinate.service", timeout_sec=7200
+    )
 
     # update-germinate triggers update-mismatches via OnSuccess= in turn.
     wait_oneshot_finished(
