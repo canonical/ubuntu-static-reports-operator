@@ -370,7 +370,7 @@ def test_collector_defaults_to_all_reports_and_local_serving(monkeypatch):
         if health.REPORT_SPECS[name].interval:
             units[f"{name}.timer"] = _timer()
     units["nginx.service"] = _service(active="active")
-    monkeypatch.setattr(collector, "_systemd", lambda names: units)
+    monkeypatch.setattr(collector, "_systemd", lambda: units)
     monkeypatch.setattr(collector, "_outputs_present", lambda name: True)
 
     def snapshots(name):
@@ -420,7 +420,7 @@ def test_systemd_collection_is_bounded_and_parses_multiple_units(tmp_path):
         return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
 
     collector = health.HealthCollector(runner=runner)
-    units = collector._systemd(["one"])
+    units = collector._systemd()
     assert units["one.service"]["ActiveState"] == "inactive"
     assert units["one.timer"]["ActiveState"] == "active"
     assert calls[0][1]["timeout"] == 10
@@ -566,7 +566,7 @@ def test_single_service_collection_retains_parent_failure(monkeypatch):
         {f"{name}.timer": _timer() for name, spec in health.REPORT_SPECS.items() if spec.interval}
     )
     units["update-archive-mirror.service"] = _service(active="failed", result="failed", status="1")
-    monkeypatch.setattr(collector, "_systemd", lambda names: units)
+    monkeypatch.setattr(collector, "_systemd", lambda: units)
     monkeypatch.setattr(collector, "_outputs_present", lambda name: True)
 
     def snapshots(name):

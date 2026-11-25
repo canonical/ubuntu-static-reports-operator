@@ -289,11 +289,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
                 lifecycle_status.name == "active"
                 and self._stored.published_health_document is None
             )
-            or (
-                lifecycle_status.name == "active"
-                and bool(lifecycle_status.message)
-                and not health_generated
-            )
+            or (lifecycle_status.name == "active" and bool(lifecycle_status.message))
         )
         if preserve_lifecycle:
             event.add_status(lifecycle_status)

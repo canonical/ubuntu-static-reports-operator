@@ -624,7 +624,7 @@ class HealthCollector:
         self.runner = runner
         self.http_probe = http_probe or self._nginx_probe
 
-    def _systemd(self, names: list[str]) -> dict[str, dict[str, str]]:
+    def _systemd(self) -> dict[str, dict[str, str]]:
         properties = (
             "Id,LoadState,ActiveState,SubState,Result,ConditionResult,ExecMainStatus,"
             "InvocationID,UnitFileState,LastTriggerUSec,NextElapseUSecRealtime,"
@@ -824,7 +824,7 @@ class HealthCollector:
         """Return health for one report or all reports and local serving."""
         selected = _selected_service_names(service)
         now = self.now().astimezone(timezone.utc)
-        units = self._systemd(list(SERVICE_NAMES))
+        units = self._systemd()
         statuses: dict[str, str] = {}
         reports = []
         for name in selected:
