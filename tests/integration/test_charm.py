@@ -105,7 +105,7 @@ def test_sru_report_logs_progress_in_debug_mode(juju: jubilant.Juju):
     try:
         juju.ssh(
             unit,
-            f"sudo systemctl stop sru-report.service; "
+            "sudo systemctl stop sru-report.timer sru-report.service; "
             f"sudo rm -f {report_new}; "
             f"sudo install -d {override_dir} && "
             f"printf '[Service]\\nEnvironment=DEBUG=1\\n' | "
@@ -132,7 +132,8 @@ def test_sru_report_logs_progress_in_debug_mode(juju: jubilant.Juju):
             unit,
             "sudo systemctl stop sru-report.service; "
             f"sudo rm -f {override_dir}/debug.conf {report_new}; "
-            "sudo systemctl daemon-reload",
+            "sudo systemctl daemon-reload; "
+            "sudo systemctl start sru-report.timer",
         )
 
 
