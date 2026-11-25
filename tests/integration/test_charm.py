@@ -41,11 +41,14 @@ def test_service_state_after_deploy(
         service="update-sync-blocklist.service",
         timeout_sec=600,
     )
-    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-seeds.service")
+    # update-seeds performs a Launchpad-bound cold clone on its first run and
+    # publishes individual seed files incrementally. The content tests below
+    # wait for the specific seed content they need instead of requiring the
+    # entire background clone to finish.
 
 
 # These have to follow test_service_state_after_deploy so content is ready
-@retry(retry_num=20, retry_sleep_sec=6)
+@retry(retry_num=150, retry_sleep_sec=6)
 def check_content(juju: jubilant.Juju, path, startswith, contains):
     """Check if the response matches the expected content."""
     response = requests.get(f"http://{address(juju)}:80/{path}", timeout=30)
@@ -319,7 +322,12 @@ def test_content_mismatches(juju: jubilant.Juju):
         "ubuntu-static-reports/0",
         "sudo systemctl start --no-block update-seeds.service",
     )
-    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-seeds.service")
+    wait_oneshot_finished(
+        juju,
+        unit="ubuntu-static-reports/0",
+        service="update-seeds.service",
+        timeout_sec=7200,
+    )
 
     juju.ssh(
         "ubuntu-static-reports/0",

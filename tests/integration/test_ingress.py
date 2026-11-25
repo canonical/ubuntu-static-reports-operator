@@ -43,11 +43,12 @@ def test_service_state_after_ha_deploy(
     wait_oneshot_finished(
         juju, unit="ubuntu-static-reports/0", service="update-sync-blocklist.service"
     )
-    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-seeds.service")
+    # The cold update-seeds clone continues in the background. The content
+    # tests below wait for the required seed content through the ingress.
 
 
 # These have to follow test_service_state_after_ha_deploy so content is ready
-@retry(retry_num=48, retry_sleep_sec=10)
+@retry(retry_num=90, retry_sleep_sec=10)
 def check_content(juju: jubilant.Juju, path: str, startswith: str, contains: str):
     """Check if the response through haproxy matches the expected content."""
     model_name = juju.model
