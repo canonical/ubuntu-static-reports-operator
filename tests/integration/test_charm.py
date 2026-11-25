@@ -75,10 +75,13 @@ def test_content_update_seeds(juju: jubilant.Juju):
 
 
 def test_content_package_subscribers(juju: jubilant.Juju):
-    """Check the response of package-subscribers."""
-    wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="package-subscribers.service"
-    )
+    """Check the response of package-subscribers.
+
+    A timer may start another long invocation after the first successful run.
+    The published JSON is the integration contract, so waiting for every
+    overlapping invocation would turn a known Launchpad hang into a two-hour
+    test delay.
+    """
     check_content(
         juju,
         path="package-team-mapping.json",
