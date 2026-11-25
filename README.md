@@ -26,7 +26,9 @@ runtime limits.
 * update-seeds
   * TL;DR: conversion of git branches about the seeds into directories, avoids pressure on the git servers
   * Unit definitions: [timer](src/systemd/update-seeds.timer) and [service](src/systemd/update-seeds.service)
-  * Execution time: ~13 minutes initially, 1 minute on updates (2h timeout)
+  * Execution time: highly variable on the first cold clone and can exceed 30
+    minutes when Launchpad is slow; later runs usually take about 1 minute
+    (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
   * Data: Maintained in git at `https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}`
   * Old location: https://ubuntu-archive-team.ubuntu.com/seeds/
