@@ -11,6 +11,8 @@ authority for running, skipped, failed, and timed-out invocations.
 import json
 import logging
 import os
+import re
+import stat
 import subprocess
 import urllib.request
 from dataclasses import dataclass, field
@@ -23,20 +25,7 @@ DEFAULT_HEALTH_DIR = Path("/var/lib/staticreports/health")
 DEFAULT_MIRROR_DIR = Path("/srv/staticreports")
 DEFAULT_WEB_ROOT = Path("/srv/staticreports/www")
 DEFAULT_HOME = Path("/home/ubuntu")
-SERVICE_NAMES = (
-    "update-bugpatterns",
-    "update-sync-blocklist",
-    "update-seeds",
-    "packageset-report",
-    "package-subscribers",
-    "permissions-report",
-    "sru-report",
-    "update-archive-mirror",
-    "update-germinate",
-    "update-mismatches",
-    "update-nbs",
-    "seeded-in-ubuntu-indexer",
-)
+REPORT_DESCRIPTION_PREFIX = "Ubuntu Static Reports - "
 STRUCTURED_OUTCOME_SERVICES = frozenset(
     {
         "update-archive-mirror",
@@ -62,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ReportSpec:
-    """Static health policy for one report service."""
+    """Health policy derived from a report's systemd service and timer."""
 
     interval: int | None = None
     jitter: int = 0
@@ -72,20 +61,84 @@ class ReportSpec:
     structured: bool = False
 
 
-REPORT_SPECS = {
-    "update-bugpatterns": ReportSpec(interval=300, jitter=60),
-    "update-sync-blocklist": ReportSpec(interval=300, jitter=60),
-    "update-seeds": ReportSpec(interval=900, jitter=60),
-    "packageset-report": ReportSpec(interval=21600, jitter=300, credential=True),
-    "package-subscribers": ReportSpec(interval=1800, jitter=300),
-    "permissions-report": ReportSpec(interval=21600, jitter=300, credential=True),
-    "sru-report": ReportSpec(interval=1800, jitter=300, runtime_limit=28800),
-    "update-archive-mirror": ReportSpec(interval=1800, jitter=30, structured=True),
-    "update-germinate": ReportSpec(parent="update-archive-mirror", structured=True),
-    "update-mismatches": ReportSpec(parent="update-germinate", structured=True),
-    "update-nbs": ReportSpec(parent="update-archive-mirror", structured=True),
-    "seeded-in-ubuntu-indexer": ReportSpec(parent="update-germinate", structured=True),
-}
+def _duration_seconds(value: str | None) -> int | None:
+    """Convert the systemd duration forms used by these units to seconds."""
+    if not value:
+        return None
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)([a-zA-Z]*)", value.strip())
+    if not match:
+        raise ValueError(f"Unsupported systemd duration: {value!r}")
+    amount, unit = match.groups()
+    factors = {"": 1, "s": 1, "sec": 1, "min": 60, "h": 3600, "d": 86400}
+    if unit not in factors:
+        raise ValueError(f"Unsupported systemd duration unit: {value!r}")
+    return int(float(amount) * factors[unit])
+
+
+def _unit_values(path: Path) -> dict[str, str]:
+    values = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and not line.lstrip().startswith(("#", ";")):
+            values[key.strip()] = value.strip()
+    return values
+
+
+def _load_report_specs(unit_dir: Path) -> dict[str, ReportSpec]:
+    """Load policy from deployed units, with source units as a development fallback."""
+    if not (unit_dir / "update-bugpatterns.service").exists():
+        unit_dir = Path(__file__).parent / "systemd"
+    services = {
+        path.stem: values
+        for path in sorted(unit_dir.glob("*.service"))
+        if (values := _unit_values(path))
+        .get("Description", "")
+        .startswith(REPORT_DESCRIPTION_PREFIX)
+    }
+    parents = {}
+    for parent, service in services.items():
+        for child in service.get("OnSuccess", "").split():
+            parents[child.removesuffix(".service")] = parent
+    specs = {}
+    for service_name, service in services.items():
+        timer_path = unit_dir / f"{service_name}.timer"
+        timer = _unit_values(timer_path) if timer_path.exists() else {}
+        limits = [
+            value
+            for key in ("TimeoutStartSec", "RuntimeMaxSec")
+            if (value := _duration_seconds(service.get(key))) is not None
+        ]
+        specs[service_name] = ReportSpec(
+            interval=_duration_seconds(timer.get("OnUnitActiveSec")),
+            jitter=_duration_seconds(timer.get("RandomizedDelaySec")) or 0,
+            runtime_limit=min(limits) if limits else 7200,
+            parent=parents.get(service_name),
+            credential="ConditionFileNotEmpty" in service,
+            structured=service_name in STRUCTURED_OUTCOME_SERVICES,
+        )
+    return specs
+
+
+def _parents_first(specs: dict[str, ReportSpec]) -> dict[str, ReportSpec]:
+    ordered = []
+
+    def add(name: str) -> None:
+        if name in ordered:
+            return
+        parent = specs[name].parent
+        if parent in specs:
+            add(parent)
+        ordered.append(name)
+
+    for name in sorted(specs):
+        add(name)
+    return {name: specs[name] for name in ordered}
+
+
+REPORT_SPECS = _parents_first(
+    _load_report_specs(Path(os.environ.get("STATIC_REPORTS_UNIT_DIR", "/etc/systemd/system")))
+)
+SERVICE_NAMES = tuple(REPORT_SPECS)
 
 
 @dataclass

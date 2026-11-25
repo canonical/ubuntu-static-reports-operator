@@ -97,6 +97,35 @@ def test_service_catalog_covers_every_report_and_matches_unit_timing():
             assert spec.jitter == _seconds(jitter)
 
 
+def test_report_specs_are_loaded_from_unit_files(tmp_path):
+    (tmp_path / "update-bugpatterns.service").write_text(
+        "[Unit]\nDescription=Ubuntu Static Reports - Bug Patterns Web view\n"
+        "[Service]\nTimeoutStartSec=3h\n"
+    )
+    (tmp_path / "update-bugpatterns.timer").write_text(
+        "[Timer]\nOnUnitActiveSec=20min\nRandomizedDelaySec=45\n"
+    )
+    (tmp_path / "update-archive-mirror.service").write_text(
+        "[Unit]\nDescription=Ubuntu Static Reports - archive mirror sync\n"
+        "[Service]\nTimeoutStartSec=2h\nConditionFileNotEmpty=/tmp/oauth\n"
+        "OnSuccess=update-bugpatterns.service\n"
+    )
+    (tmp_path / "dbus-org.freedesktop.resolve1.service").write_text(
+        "[Unit]\nDescription=Network Name Resolution\n"
+    )
+    (tmp_path / "jujud-machine-0.service").write_text("[Unit]\nDescription=juju unit agent\n")
+
+    specs = health._load_report_specs(tmp_path)
+
+    assert set(specs) == {"update-bugpatterns", "update-archive-mirror"}
+    assert specs["update-bugpatterns"].interval == 1200
+    assert specs["update-bugpatterns"].jitter == 45
+    assert specs["update-bugpatterns"].runtime_limit == 10800
+    assert specs["update-bugpatterns"].parent == "update-archive-mirror"
+    assert specs["update-archive-mirror"].credential is True
+    assert specs["update-archive-mirror"].structured is True
+
+
 def test_record_outcome_writes_versioned_json_atomically(tmp_path, monkeypatch):
     monkeypatch.setenv("INVOCATION_ID", "systemd-invocation")
     assert health.record_outcome(

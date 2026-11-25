@@ -16,6 +16,8 @@ import charms.operator_libs_linux.v1.systemd as systemd
 from charmlibs import apt, pathops
 from charmlibs.apt import PackageError, PackageNotFoundError
 
+from staticreports_health import SERVICE_NAMES
+
 logger = logging.getLogger(__name__)
 
 PACKAGES = [
@@ -61,20 +63,7 @@ ROBOTS_TXT_WEB_PATH = Path("/srv/staticreports/www/robots.txt")
 
 UNATTENDED_UPGRADES_CONFIG_PATH = Path("/etc/apt/apt.conf.d/50unattended-upgrades")
 
-UBUNTU_STATIC_REPORT_SERVICES = [
-    "update-bugpatterns",
-    "update-sync-blocklist",
-    "update-seeds",
-    "packageset-report",
-    "package-subscribers",
-    "permissions-report",
-    "sru-report",
-    "update-archive-mirror",
-    "update-germinate",
-    "update-mismatches",
-    "update-nbs",
-    "seeded-in-ubuntu-indexer",
-]
+UBUNTU_STATIC_REPORT_SERVICES = list(SERVICE_NAMES)
 
 LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
 
