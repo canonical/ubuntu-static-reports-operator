@@ -197,7 +197,7 @@ same schema version.
 
 The document is shared by the CLI and the Juju diagnostic action. It is also the
 intended input to the cached exporter described in
-`handover-and-plan-for-cos.md`.
+[the COS integration handover](../handover-and-plan-for-cos.md).
 
 ## Follow-up commands
 

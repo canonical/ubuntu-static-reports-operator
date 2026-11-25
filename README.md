@@ -225,6 +225,12 @@ necessary.
 ❯ systemctl status update-sync-blocklist.service
 ```
 
+## Future COS integration
+
+The [COS integration handover](handover-and-plan-for-cos.md) describes how the
+same health document can feed a cached loopback exporter and the OpenTelemetry
+Collector without duplicating the health rules or requiring COS for local use.
+
 ## Testing
 
 For information on running tests and development workflows, see the [contribution guide](CONTRIBUTING.md).
