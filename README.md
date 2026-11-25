@@ -8,13 +8,15 @@ and therefore are done on a regular schedule with the reports then being made
 available on the web.
 
 This reposistory contains the code for the charm, the applications are coming
-from various sources depending on the respective service.
+from various sources depending on the respective service. The systemd unit
+definitions are the source of truth for report schedules, dependencies, and
+runtime limits.
 
 ## List of covered services
 
 * update-sync-blocklist
   * TL;DR: git checkout and serve as html avoiding pressure on the cgit frontend
-  * Timing: every 5 minutes
+  * Unit definitions: [timer](src/systemd/update-sync-blocklist.timer) and [service](src/systemd/update-sync-blocklist.service)
   * Execution time: <30 seconds (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-sync-blocklist
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-archive/+git/sync-blocklist/tree/sync-blocklist.txt
@@ -23,7 +25,7 @@ from various sources depending on the respective service.
 
 * update-seeds
   * TL;DR: conversion of git branches about the seeds into directories, avoids pressure on the git servers
-  * Timing: every 5 minutes
+  * Unit definitions: [timer](src/systemd/update-seeds.timer) and [service](src/systemd/update-seeds.service)
   * Execution time: ~13 minutes initially, 1 minute on updates (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-scripts/tree/update-seeds
   * Data: Maintained in git at `https://git.launchpad.net/~$team/ubuntu-seeds/+git/${dist%.*}`
@@ -32,7 +34,7 @@ from various sources depending on the respective service.
 
 * package-subscribers
   * TL;DR: convert LP API information about package subscribers to json for faster consumption by other tools
-  * Timing: twice an hour
+  * Unit definitions: [timer](src/systemd/package-subscribers.timer) and [service](src/systemd/package-subscribers.service)
   * Execution time: ~3 min (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/package-subscribers
   * Data: Structural subscriptions in Launchpad of registered teams to source packages
@@ -41,7 +43,7 @@ from various sources depending on the respective service.
 
 * permissions-report
   * TL;DR: Convert LP API data into a report about package upload ACLs
-  * Timing: every 6 hours
+  * Unit definitions: [timer](src/systemd/permissions-report.timer) and [service](src/systemd/permissions-report.service)
   * Execution time: ~10 minutes (2h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
   * Data: Per Package ACLs stored in Launchpad
@@ -50,16 +52,16 @@ from various sources depending on the respective service.
 
 * packageset-report
   * TL;DR: Convert LP API data into a report about package sets as used for upload permissions
-  * Timing: every 6 hours
+  * Unit definitions: [timer](src/systemd/packageset-report.timer) and [service](src/systemd/packageset-report.service)
   * Execution time: ~10 minutes (2h timeout)
-  * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/permissions-report 
+  * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/packageset-report
   * Data: Package Set information stored in Launchpad
   * Old location: https://ubuntu-archive-team.ubuntu.com/packagesets/
   * New location: https://static-reports.ubuntu.com/packagesets/
 
 * update-bugpatterns
   * TL;DR: git checkout and serve as XML avoiding pressure on the cgit frontend
-  * Timing: every hour
+  * Unit definitions: [timer](src/systemd/update-bugpatterns.timer) and [service](src/systemd/update-bugpatterns.service)
   * Execution time: <30 seconds (2h timeout)
   * Code: included in this charm
   * Data: Maintained in git at https://git.launchpad.net/~ubuntu-bugcontrol/apport/+git/ubuntu-bugpatterns
@@ -68,7 +70,7 @@ from various sources depending on the respective service.
 
 * sru-report
   * TL;DR: generate the Pending Ubuntu SRU report
-  * Timing: every 30 minutes
+  * Unit definitions: [timer](src/systemd/sru-report.timer) and [service](src/systemd/sru-report.service)
   * Execution time: up to several hours (8h timeout)
   * Code: https://git.launchpad.net/ubuntu-archive-tools/tree/sru-report
   * Data: Pending SRUs in the `-proposed` pockets for all stable releases of Ubuntu
@@ -77,7 +79,7 @@ from various sources depending on the respective service.
 
 * update-archive-mirror
   * TL;DR: Build and atomically publish one consistent archive-index snapshot that other services (update-germinate, NBS) share as a single source of truth
-  * Timing: every 30 minutes, but a new snapshot is only built and swapped in when the archive indices actually changed
+  * Unit definitions: [timer](src/systemd/update-archive-mirror.timer) and [service](src/systemd/update-archive-mirror.service)
   * Execution time: seconds when nothing changed; under a minute for a full rsync (2h timeout)
   * Code: `update-archive-mirror`
   * Data: A local rsync mirror of the archive indices (the `dists` tree) from the archive (configurable via `rsync_archive_source`)
@@ -85,7 +87,7 @@ from various sources depending on the respective service.
 
 * update-germinate
   * TL;DR: Germinate the current archive-mirror snapshot against the published seeds, publishing the combined archive+germinate result for other services to consume
-  * Timing: after the archive mirror was updated
+  * Unit definition: [service](src/systemd/update-germinate.service)
   * Execution time: 30 minutes to an hour when the snapshot changed, seconds otherwise (2h timeout)
   * Code: wrapper `update-germinate` is included in this charm; the germinate tool itself comes from https://git.launchpad.net/ubuntu-archive-tools
   * Data: Current archive indices (from update-archive-mirror) and seeds (from update-seeds)
@@ -99,7 +101,7 @@ from various sources depending on the respective service.
 
 * update-mismatches
   * TL;DR: Generate the archive override mismatch reports (architecture, component, pocket, priority)
-  * Timing: after germinate completed
+  * Unit definition: [service](src/systemd/update-mismatches.service)
   * Execution time: usually <=15 minutes (2h timeout)
   * Code: wrapper `update-mismatches` is included in this charm; the mismatch reports themselves come from https://git.launchpad.net/ubuntu-archive-tools
   * Data: Current germinate snapshot (which already includes the archive indices)
@@ -109,7 +111,7 @@ from various sources depending on the respective service.
 
 * seeded-in-ubuntu-indexer
   * TL;DR: Generate the indexes for the `seeded-in-ubuntu` command in `ubuntu-dev-tools`.
-  * Timing: after germinate completed
+  * Unit definition: [service](src/systemd/seeded-in-ubuntu-indexer.service)
   * Execution time: <1 min (2h timeout)
   * Code: the whole script is included in this charm and doesn't depend on any external code
   * Data: Current germinate snapshot
@@ -122,7 +124,7 @@ from various sources depending on the respective service.
 
 * update-nbs
   * TL;DR: Generate the NBS ("Not Built from Source") report of binary packages still published in the archive whose source no longer builds them
-  * Timing: after the archive mirror was updated (in parallel with update-germinate)
+  * Unit definition: [service](src/systemd/update-nbs.service)
   * Execution time: 2-4 minutes when the snapshot changed, under an hour in complex cases (2h timeout)
   * Code: wrapper `update-nbs` is included in this charm; the underlying tools (archive-cruft-check, checkrdepends, nbs-report) come from ubuntu-archive-tools
   * Data: Current archive indices (from update-archive-mirror)
@@ -205,12 +207,15 @@ The underlying services and timers can also be inspected directly with
 `systemctl` and `journalctl`.
 
 ```bash
-❯ systemctl list-timers --all update-bugpatterns update-seeds update-sync-blocklist packageset-report package-subscribers permissions-report update-mismatches update-germinate update-nbs update-archive-mirror
+❯ systemctl list-timers --all \
+    package-subscribers.timer packageset-report.timer permissions-report.timer \
+    sru-report.timer update-archive-mirror.timer update-bugpatterns.timer \
+    update-seeds.timer update-sync-blocklist.timer
 ```
 
 Since the report execution is wrapped into systemd services, one can also use
 `systemctl status` as well as `journalctl -eu` to assess state and debug if
-neccessary.
+necessary.
 
 ```bash
 ❯ journalctl -eu update-sync-blocklist
