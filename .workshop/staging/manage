@@ -25,7 +25,7 @@ usage() {
 
 charm_path() {
   local charm
-  charm="$(ls -t ~/${CHARM_GLOB} 2>/dev/null | head -1)"
+  charm="$(find ~ -maxdepth 1 -type f -name "$CHARM_GLOB" -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
   [ -n "$charm" ] || die "no charm packed yet - run 'workshop run staging -- build' first (or deploy, which packs)"
   echo "$charm"
 }
@@ -113,26 +113,53 @@ sweep_test_models() {
   # jubilant's temp_model destroys its models on exit; only a killed run can
   # leak one. Sweep leftovers so state never accumulates across runs.
   local leaked
-  leaked="$(juju models --format json 2>/dev/null | python3 -c '
+  if ! leaked="$(juju models --format json 2>/dev/null | python3 -c '
 import json, sys
-try:
-    print(" ".join(m["short-name"] for m in json.load(sys.stdin)["models"] if m["short-name"].startswith("jubilant-")))
-except Exception:
-    pass
-' || true)"
+print(" ".join(m["short-name"] for m in json.load(sys.stdin)["models"] if m["short-name"].startswith("jubilant-")))
+')"; then
+    echo "error: could not enumerate Juju models for cleanup" >&2
+    return 1
+  fi
   [ -n "$leaked" ] || return 0
   echo "destroying leaked test models: $leaked"
-  local m
+  local m rc=0
   for m in $leaked; do
-    juju destroy-model "$m" --no-prompt --force --destroy-storage || true
+    juju destroy-model "$m" --no-prompt --force --destroy-storage || rc=1
   done
+  local remaining
+  if ! remaining="$(juju models --format json 2>/dev/null | python3 -c '
+import json, sys
+print(" ".join(m["short-name"] for m in json.load(sys.stdin)["models"] if m["short-name"].startswith("jubilant-")))
+')"; then
+    echo "error: could not verify model cleanup" >&2
+    return 1
+  fi
+  for m in $leaked; do
+    if grep -qw "$m" <<<"$remaining"; then
+      echo "error: model $m remains after destroy" >&2
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
+_integration_cleanup() {
+  # Preserve a test/signal failure; a clean test still fails if cleanup fails.
+  local rc="${1:-$?}" cleanup_rc=0
+  trap - HUP INT TERM EXIT
+  sweep_test_models || cleanup_rc=$?
+  if [ "$cleanup_rc" -ne 0 ]; then
+    echo "error: test-model cleanup failed (test status $rc, cleanup status $cleanup_rc)" >&2
+  fi
+  [ "$rc" -ne 0 ] && exit "$rc"
+  exit "$cleanup_rc"
 }
 
 pack() {
   cd /project
   sg lxd -c "charmcraft pack --use-lxd"
   # The juju snap cannot read the /project host mount, hence the copy.
-  cp -f $CHARM_GLOB ~/
+  find /project -maxdepth 1 -type f -name "$CHARM_GLOB" -exec cp -f {} ~ \;
 }
 
 app_exists() {
@@ -190,8 +217,8 @@ deploy() {
 
   if [ -z "${SKIP_WAIT:-}" ]; then
     echo "waiting for the unit to settle (up to 10 min)..."
-    local i status
-    for i in $(seq 1 60); do
+    local status
+    for _ in $(seq 1 60); do
       sleep 10
       status="$(unit_status)"
       case "$status" in
@@ -209,6 +236,10 @@ redeploy() {
 }
 
 integration() {
+  trap '_integration_cleanup 129' HUP
+  trap '_integration_cleanup 130' INT
+  trap '_integration_cleanup 143' TERM
+  trap '_integration_cleanup $?' EXIT
   ensure_juju
   # The staging app would double the report load on this VM - remove it.
   echo "removing staging app to free the VM for the test run"
@@ -231,8 +262,7 @@ integration() {
 destroy() {
   app_exists || { echo "nothing to destroy"; return 0; }
   juju remove-application "$APP" --no-prompt --force --destroy-storage
-  local i
-  for i in $(seq 1 30); do
+  for _ in $(seq 1 30); do
     app_exists || break
     sleep 5
   done

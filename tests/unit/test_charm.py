@@ -7,7 +7,9 @@ These tests only cover those methods that do not require internet access,
 and do not attempt to manipulate the underlying machine.
 """
 
-from subprocess import CalledProcessError
+import json
+from pathlib import Path
+from subprocess import CalledProcessError, TimeoutExpired
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -25,11 +27,14 @@ from ops.testing import (
     Context,
     Network,
     Relation,
+    Secret,
     State,
     TCPPort,
 )
 
+import staticreports_health as health
 from charm import UbuntuStaticReportsCharm
+from staticreports import ReportAlreadyRunningError
 
 
 @pytest.fixture
@@ -60,6 +65,13 @@ def mock_configure_mismatches():
 def mock_configure_seeded_in_ubuntu_index():
     """Stub configure_seeded_in_ubuntu_indexer so unit tests never write to the host."""
     with patch("charm.StaticReports.configure_seeded_in_ubuntu_indexer") as mock:
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_clear_lpoauthkey():
+    """Prevent credential-removal tests from touching the host filesystem."""
+    with patch("charm.StaticReports.clear_lpoauthkey", return_value=True) as mock:
         yield mock
 
 
@@ -239,7 +251,10 @@ def test_start_event_opens_port_80_and_sets_active_status(start_mock, ctx, base_
 
 
 @patch("charm.StaticReports.start")
-@pytest.mark.parametrize("exception", [CalledProcessError(1, "foo")])
+@pytest.mark.parametrize(
+    "exception",
+    [CalledProcessError(1, "foo"), SystemdError("systemctl failed")],
+)
 def test_start_event_blocks_charm_when_service_start_fails(start_mock, exception, ctx, base_state):
     start_mock.side_effect = exception
 
@@ -251,28 +266,136 @@ def test_start_event_blocks_charm_when_service_start_fails(start_mock, exception
     assert out.opened_ports == frozenset()
 
 
-@patch("charm.StaticReports.refresh_report")
-def test_refresh_action_triggers_report_refresh_and_logs_message(
-    refresh_report_mock, ctx, base_state
+def _diagnostic_document(status="ok"):
+    return {
+        "schema_version": 1,
+        "generated_at": "2026-11-24T12:00:00+00:00",
+        "status": status,
+        "summary": "test summary",
+        "reports": [
+            {
+                "service": "update-nbs",
+                "status": status,
+                "outcome": "published" if status == "ok" else "failed",
+                "reason": "test reason",
+            }
+        ],
+        "serving": {"status": "ok", "reason": "probe passed"},
+    }
+
+
+@patch("charm.health.HealthCollector")
+def test_diagnose_action_returns_shared_document_for_all_services(
+    collector_class, ctx, base_state
 ):
-    out = ctx.run(ctx.on.action("refresh"), base_state)
+    collector_class.return_value.collect.return_value = _diagnostic_document()
+    out = ctx.run(ctx.on.action("static-reports-diagnose"), base_state)
+    collector_class.return_value.collect.assert_called_once_with(None)
+    assert ctx.action_results["schema-version"] == "1"
+    assert ctx.action_results["status"] == "ok"
+    assert json.loads(ctx.action_results["report"])["reports"][0]["service"] == "update-nbs"
+    assert out.unit_status == base_state.unit_status
 
-    assert ctx.action_logs == ["Refreshing the report"]
-    assert out.unit_status == ActiveStatus()
-    assert refresh_report_mock.called
+
+@patch("charm.health.HealthCollector")
+def test_diagnose_action_uses_configured_mirror_directory(collector_class, ctx):
+    collector_class.return_value.collect.return_value = _diagnostic_document()
+    state = State(leader=True, config={"mirror_dir": "/srv/custom-mirror"})
+
+    ctx.run(ctx.on.action("static-reports-diagnose"), state)
+
+    collector_class.assert_called_once_with(mirror_dir=Path("/srv/custom-mirror"))
 
 
-@patch("charm.StaticReports.refresh_report")
-def test_refresh_action_sets_status_message_when_refresh_fails(
-    refresh_report_mock, ctx, base_state
+@patch("charm.health.HealthCollector")
+def test_diagnose_action_forwards_service_and_returns_unhealthy_result(
+    collector_class, ctx, base_state
 ):
-    refresh_report_mock.side_effect = CalledProcessError(1, "refresh")
-
-    out = ctx.run(ctx.on.action("refresh"), base_state)
-
-    assert out.unit_status == ActiveStatus(
-        "Failed to refresh the report. Check `juju debug-log` for details."
+    collector_class.return_value.collect.return_value = _diagnostic_document("critical")
+    ctx.run(
+        ctx.on.action("static-reports-diagnose", params={"service": "update-nbs"}),
+        base_state,
     )
+    collector_class.return_value.collect.assert_called_once_with("update-nbs")
+    assert ctx.action_results["status"] == "critical"
+
+
+@patch("charm.health.HealthCollector")
+def test_diagnose_action_fails_only_when_collection_fails(collector_class, ctx, base_state):
+    collector_class.return_value.collect.side_effect = health.HealthCollectionError("no systemctl")
+    with pytest.raises(ops.testing.ActionFailed) as failure:
+        ctx.run(ctx.on.action("static-reports-diagnose"), base_state)
+    assert "no systemctl" in failure.value.message
+
+
+@patch("charm.health.HealthCollector")
+@patch("charm.StaticReports.run_report")
+def test_run_report_action_runs_one_service_and_returns_health(
+    run_report_mock, collector_class, ctx, base_state
+):
+    collector_class.return_value.collect.return_value = _diagnostic_document()
+    out = ctx.run(
+        ctx.on.action("run-report", params={"service": "update-nbs"}),
+        base_state,
+    )
+    run_report_mock.assert_called_once_with("update-nbs", restart=False)
+    collector_class.return_value.collect.assert_called_once_with("update-nbs")
+    assert ctx.action_logs == [
+        "Running update-nbs. This may take a while; use --background for long reports."
+    ]
+    assert ctx.action_results["outcome"] == "published"
+    assert out.unit_status == ActiveStatus()
+
+
+@patch("charm.StaticReports.run_report")
+def test_run_report_action_refuses_unintended_interruption(run_report_mock, ctx, base_state):
+    run_report_mock.side_effect = ReportAlreadyRunningError(
+        "already running; restart=true required"
+    )
+    with pytest.raises(ops.testing.ActionFailed) as failure:
+        ctx.run(
+            ctx.on.action("run-report", params={"service": "update-nbs"}),
+            base_state,
+        )
+    assert "restart=true" in failure.value.message
+
+
+@patch("charm.StaticReports.run_report")
+@pytest.mark.parametrize(
+    "exception",
+    [SystemdError("start failed"), TimeoutExpired("systemctl", 10)],
+)
+def test_run_report_action_fails_on_service_operation_error(
+    run_report_mock, exception, ctx, base_state
+):
+    run_report_mock.side_effect = exception
+    with pytest.raises(ops.testing.ActionFailed) as failure:
+        ctx.run(
+            ctx.on.action("run-report", params={"service": "update-nbs"}),
+            base_state,
+        )
+    assert "Failed to run update-nbs" in failure.value.message
+
+
+@patch("charm.health.HealthCollector")
+@patch("charm.StaticReports.run_report")
+def test_run_report_action_fails_when_service_is_condition_skipped(
+    run_report_mock, collector_class, ctx, base_state
+):
+    document = _diagnostic_document("waiting")
+    document["reports"][0]["outcome"] = "condition_skipped"
+    collector_class.return_value.collect.return_value = document
+    with pytest.raises(ops.testing.ActionFailed) as failure:
+        ctx.run(
+            ctx.on.action(
+                "run-report",
+                params={"service": "permissions-report", "restart": True},
+            ),
+            base_state,
+        )
+    run_report_mock.assert_called_once_with("permissions-report", restart=True)
+    assert "skipped" in failure.value.message
+    assert ctx.action_results["outcome"] == "condition_skipped"
 
 
 @patch(
@@ -373,13 +496,79 @@ def test_get_external_url_prioritizes_ingress_url_over_binding(
     lpoauth_mock.assert_called()
 
 
-def test_config_changed_sets_active_message_when_lp_secret_not_configured(ctx, base_state):
-    """Without the optional LP token the charm stays active with a hint."""
+def test_config_changed_waits_and_removes_stale_oauth_when_secret_not_configured(
+    mock_clear_lpoauthkey, ctx, base_state
+):
     out = ctx.run(ctx.on.config_changed(), base_state)
 
+    mock_clear_lpoauthkey.assert_called_once_with()
     assert out.unit_status == ActiveStatus(
-        "Launchpad oauth token not configured - authenticated reports are disabled."
+        "Authenticated reports waiting for Launchpad credentials."
     )
+
+
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=PropertyMock,
+)
+def test_config_changed_blocks_invalid_configured_secret_and_removes_stale_oauth(
+    lp_oauth_prop_mock, mock_clear_lpoauthkey, ctx
+):
+    lp_oauth_prop_mock.return_value = None
+    secret = Secret(
+        {"lpoauthkey": "invalid"},
+        id="secret:11111111111111111111",
+        remote_grants={1: {"ubuntu-static-reports"}},
+    )
+    state = State(
+        leader=True,
+        config={"lpuser_secret_id": "secret:11111111111111111111"},
+        secrets={secret},
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    mock_clear_lpoauthkey.assert_called_once_with()
+    assert out.unit_status == BlockedStatus(
+        "Launchpad oauth token is configured but unavailable or invalid."
+    )
+
+
+@patch(
+    "charm.UbuntuStaticReportsCharm._lpuser_lp_oauthkey",
+    new_callable=PropertyMock,
+)
+def test_config_changed_rejects_blank_configured_secret(
+    lp_oauth_prop_mock, mock_clear_lpoauthkey, ctx
+):
+    lp_oauth_prop_mock.return_value = "   "
+    secret = Secret(
+        {"lpoauthkey": "   "},
+        id="secret:11111111111111111111",
+        remote_grants={1: {"ubuntu-static-reports"}},
+    )
+    state = State(
+        leader=True,
+        config={"lpuser_secret_id": "secret:11111111111111111111"},
+        secrets={secret},
+    )
+
+    out = ctx.run(ctx.on.config_changed(), state)
+
+    mock_clear_lpoauthkey.assert_called_once_with()
+    assert out.unit_status == BlockedStatus(
+        "Launchpad oauth token is configured but unavailable or invalid."
+    )
+
+
+def test_config_changed_blocks_when_stale_oauth_cannot_be_removed(
+    mock_clear_lpoauthkey, ctx, base_state
+):
+    mock_clear_lpoauthkey.return_value = False
+
+    out = ctx.run(ctx.on.config_changed(), base_state)
+
+    assert out.unit_status == BlockedStatus("Failed to remove stale Launchpad oauth token.")
 
 
 @patch("charm.StaticReports.configure_lpoauthkey")
@@ -424,6 +613,22 @@ def test_lpuser_lp_oauthkey_property_returns_none_when_key_missing_from_secret()
     dummy = SimpleNamespace()
     fake_secret = MagicMock()
     fake_secret.get_content.return_value = {}
+    dummy._lpuser_secret = fake_secret
+    charm = cast(UbuntuStaticReportsCharm, dummy)
+
+    result = UbuntuStaticReportsCharm._lpuser_lp_oauthkey.fget(charm)
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ops.SecretNotFoundError(), ops.model.ModelError("refresh failed")],
+)
+def test_lpuser_lp_oauthkey_returns_none_when_secret_refresh_fails(error):
+    dummy = SimpleNamespace()
+    fake_secret = MagicMock()
+    fake_secret.get_content.side_effect = error
     dummy._lpuser_secret = fake_secret
     charm = cast(UbuntuStaticReportsCharm, dummy)
 

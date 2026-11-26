@@ -34,6 +34,12 @@ from pathlib import Path
 
 from launchpadlib.launchpad import Launchpad
 
+try:
+    import staticreports_health as health
+except ModuleNotFoundError:  # Allow direct execution from the source tree.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import staticreports_health as health
+
 logger = logging.getLogger("update-nbs")
 
 # The systemd unit runs this as User=ubuntu, so HOME is that account's home
@@ -53,6 +59,7 @@ NBS_LINE_RE = re.compile(r"^\s*o\s+.*:\s*(.+)$")
 # bare FileNotFoundError instead of just reporting nothing for it.
 KNOWN_ARCHES = ("amd64", "amd64v3", "arm64", "armhf", "i386", "ppc64el", "riscv64", "s390x")
 REFERENCE_ARCH = "amd64"
+
 
 @dataclass(frozen=True)
 class Config:
@@ -105,9 +112,7 @@ def _parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--archive-root",
         type=Path,
-        default=Path(
-            os.environ.get("ARCHIVE_ROOT", str(mirror_dir / "archive" / "current"))
-        ),
+        default=Path(os.environ.get("ARCHIVE_ROOT", str(mirror_dir / "archive" / "current"))),
         help="Path to the update-archive-mirror snapshot pointer to read.",
     )
     return parser.parse_args(argv)
@@ -302,19 +307,42 @@ def generate_report(cfg: Config) -> int:
         fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         logger.info("Another update-nbs run is in progress; exiting.")
+        health.record_outcome(
+            "update-nbs",
+            "locked",
+            "Another update-nbs run is in progress.",
+            input_snapshot=health.snapshot_name(cfg.archive_root),
+        )
         return 0
 
     snapshot = _resolve_snapshot(cfg)
     if snapshot is None:
         logger.info("No archive snapshot published at %s yet; nothing to do.", cfg.archive_root)
+        health.record_outcome(
+            "update-nbs",
+            "missing_input",
+            f"No archive snapshot is published at {cfg.archive_root}.",
+        )
         return 0
     if not (snapshot / "STAMP").exists():
         logger.warning("Snapshot %s has no STAMP; treating it as incomplete.", snapshot.name)
+        health.record_outcome(
+            "update-nbs",
+            "missing_input",
+            f"Snapshot {snapshot.name} has no STAMP.",
+            input_snapshot=snapshot.name,
+        )
         return 0
 
     snapshot_id = snapshot.name
     if not cfg.force and snapshot_id == _last_processed(cfg):
         logger.info("Archive snapshot %s already processed; nothing to do.", snapshot_id)
+        health.record_outcome(
+            "update-nbs",
+            "already_processed",
+            f"Archive snapshot {snapshot_id} was already processed.",
+            input_snapshot=snapshot_id,
+        )
         return 0
 
     # Resolve devel series here to avoid Launchpad query before it's needed.
@@ -351,12 +379,16 @@ def generate_report(cfg: Config) -> int:
 
     _record_processed(cfg, snapshot_id)
     logger.info("NBS report updated in %s from snapshot %s.", cfg.out, snapshot_id)
+    health.record_outcome(
+        "update-nbs",
+        "published",
+        f"NBS report updated from snapshot {snapshot_id}.",
+        input_snapshot=snapshot_id,
+    )
     return 0
 
 
-def _build_report(
-    cfg: Config, archive_base: Path, ftbfs: list, nbs: list, work: Path
-) -> int:
+def _build_report(cfg: Config, archive_base: Path, ftbfs: list, nbs: list, work: Path) -> int:
     """Run checkrdepends + nbs-report for `nbs`, publishing into cfg.out."""
     os.chmod(work, 0o755)
     # Mirror cron.NBS: FTBFS binaries are recorded in a 00FTBFS marker that

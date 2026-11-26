@@ -47,11 +47,14 @@ Unit tests can be run locally with no additional tools by running `make unit`. A
 
 ### Integration tests
 
-Integration tests run inside the workshop staging VM (see [Workshop staging environment](#workshop-staging-environment) below) against a temporary Juju model:
+Integration tests run inside the workshop staging VM (see [Workshop staging environment](#workshop-staging-environment) below) against a temporary Juju model. Launch it first if `workshop list` shows it as `Off`:
 
 ```bash
-❯ make integration     # or: workshop run staging -- integration
+❯ workshop launch staging  # first use, or after recreating the VM
+❯ make integration         # or: workshop run staging -- integration
 ```
+
+The integration target does not launch or resize the VM for you. After every launch or refresh, follow [Resize the workshop VM](#resize-the-workshop-vm-after-every-launch) before running the tests to avoid the disk and memory preflight errors.
 
 The harness bootstraps Juju if needed, removes leftover state first (the staging app and any leaked test models) so runs do not accumulate it, packs the charm, and runs the pytest suite in a fresh temp model that is destroyed on exit. To focus on single tests during debugging:
 
@@ -133,13 +136,14 @@ after `workshop refresh`, which recreates the VM) [Note: this being declared
 is a feature that is expected to come to workshop, then we can simplify this]:
 
 ```bash
-lxc project list | grep workshop   # -> your project, e.g. workshop.1474078681
-P=workshop.1474078681              # substitute yours below
-lxc --project "$P" list | grep ^staging   # -> VM name, e.g. staging-633d817d
-lxc --project "$P" config device set <VM> root size=80GiB    # allowed while running
-lxc --project "$P" stop <VM>                                   # memory is fixed at boot
-lxc --project "$P" config set <VM> limits.memory=8GiB limits.cpu=2
-lxc --project "$P" start <VM>
+lxc project list | grep workshop        # -> your project, e.g. workshop.1474078681
+P=workshop.1474078681                   # substitute your project below
+lxc --project "$P" list | grep staging # -> your VM, e.g. staging-633d817d
+V=staging-633d817d                      # substitute your VM name below
+lxc --project "$P" config device set "$V" root size=80GiB  # allowed while running
+lxc --project "$P" stop "$V"                               # memory is fixed at boot
+lxc --project "$P" config set "$V" limits.memory=8GiB limits.cpu=2
+lxc --project "$P" start "$V"
 workshop exec staging -- bash -lc 'sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1'
 ```
 

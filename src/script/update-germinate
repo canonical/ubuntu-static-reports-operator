@@ -50,6 +50,12 @@ import sys
 import time
 from pathlib import Path
 
+try:
+    import staticreports_health as health
+except ModuleNotFoundError:  # Allow direct execution from the source tree.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import staticreports_health as health
+
 logger = logging.getLogger("update-germinate")
 
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
@@ -115,7 +121,7 @@ def _seeds_mtime(seed_source: str) -> float:
     """Newest mtime under a local seed source (0 for a remote/absent one)."""
     if not seed_source.startswith("file://"):
         return 0.0
-    root = Path(seed_source[len("file://"):])
+    root = Path(seed_source[len("file://") :])
     newest = 0.0
     for path in root.rglob("*"):
         if ".git" in path.parts:
@@ -261,6 +267,13 @@ def germinate_and_publish(
         fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         logger.info("Another update-germinate run is in progress; exiting.")
+        health.record_outcome(
+            "update-germinate",
+            "locked",
+            "Another update-germinate run is in progress.",
+            input_snapshot=archive_snapshot_name,
+            output_snapshot=health.snapshot_name(current),
+        )
         return 0
 
     # Announce readiness now that this instance is the active worker.
@@ -275,6 +288,13 @@ def germinate_and_publish(
     )
     if not rebuild:
         logger.info("No archive or seed changes since last germinate snapshot; nothing to do.")
+        health.record_outcome(
+            "update-germinate",
+            "unchanged",
+            "No archive or seed changes since the last germinate snapshot.",
+            input_snapshot=archive_snapshot_name,
+            output_snapshot=health.snapshot_name(current),
+        )
         return 0
 
     snapshot_name = "snapshot." + time.strftime("%Y%m%dT%H%M%S", time.gmtime())
@@ -302,6 +322,13 @@ def germinate_and_publish(
     swap_current(out, snapshot)
     gc_snapshots(out, max(1, retention))
     logger.info("Published germinate snapshot %s in %s.", snapshot.name, out)
+    health.record_outcome(
+        "update-germinate",
+        "published",
+        f"Published germinate snapshot {snapshot.name}.",
+        input_snapshot=archive_snapshot_name,
+        output_snapshot=snapshot.name,
+    )
     return 0
 
 

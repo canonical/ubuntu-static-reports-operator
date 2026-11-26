@@ -16,7 +16,14 @@ import charms.operator_libs_linux.v1.systemd as systemd
 from charmlibs import apt, pathops
 from charmlibs.apt import PackageError, PackageNotFoundError
 
+from staticreports_health import SERVICE_NAMES
+
 logger = logging.getLogger(__name__)
+
+
+class ReportAlreadyRunningError(RuntimeError):
+    """Raised when a targeted run would interrupt an active report."""
+
 
 PACKAGES = [
     "distro-info",
@@ -44,6 +51,7 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/mismatches"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/nbs"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/seeded-in-ubuntu"), "ubuntu", "ubuntu"),
+    (Path("/var/lib/staticreports/health"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]
 
@@ -61,26 +69,14 @@ ROBOTS_TXT_WEB_PATH = Path("/srv/staticreports/www/robots.txt")
 
 UNATTENDED_UPGRADES_CONFIG_PATH = Path("/etc/apt/apt.conf.d/50unattended-upgrades")
 
-UBUNTU_STATIC_REPORT_SERVICES = [
-    "update-bugpatterns",
-    "update-sync-blocklist",
-    "update-seeds",
-    "packageset-report",
-    "package-subscribers",
-    "permissions-report",
-    "sru-report",
-    "update-archive-mirror",
-    "update-germinate",
-    "update-mismatches",
-    "update-nbs",
-    "seeded-in-ubuntu-indexer",
-]
+UBUNTU_STATIC_REPORT_SERVICES = list(SERVICE_NAMES)
 
 LP_OAUTH_KEY_PATH = "/home/ubuntu/.config/lp-ubuntu-archive-unprivileged-bot.oauth"
 
 ARCHIVE_MIRROR_ENV_PATH = "/etc/staticreports/archive-mirror.env"
 MISMATCHES_ENV_PATH = "/etc/staticreports/mismatches.env"
 SEEDED_IN_UBUNTU_INDEXER_ENV_PATH = "/etc/staticreports/seeded-in-ubuntu-indexer.env"
+HEALTH_MODULE_INSTALL_PATH = "/usr/lib/python3/dist-packages/staticreports_health.py"
 GERMINATE_BACKPORT_PATCH = Path(
     "/usr/local/share/staticreports/germinate-cross-flavour-blacklist.patch"
 )
@@ -345,6 +341,8 @@ class StaticReports:
             shutil.copy("src/script/apply-germinate-backport", "/usr/bin")
             # lp_series.py must be in place before the scripts that import it.
             shutil.copy("src/script/lp_series.py", "/usr/bin")
+            shutil.copy("src/staticreports_health.py", HEALTH_MODULE_INSTALL_PATH)
+            shutil.copy("src/script/static-reports-diagnose", "/usr/bin")
             shutil.copy("src/script/update-bugpatterns", "/usr/bin")
             shutil.copy("src/script/update-sync-blocklist", "/usr/bin")
             shutil.copy("src/script/update-seeds", "/usr/bin")
@@ -377,7 +375,7 @@ class StaticReports:
             for service in UBUNTU_STATIC_REPORT_SERVICES:
                 systemd.service_start(service + ".service", "--no-block")
                 logger.debug("%s service started", service)
-        except CalledProcessError as e:
+        except (CalledProcessError, systemd.SystemdError) as e:
             logger.error("Failed to start systemd services: %s", e)
             raise
 
@@ -425,6 +423,15 @@ class StaticReports:
             lp_key_file,
         )
         return key_success
+
+    def clear_lpoauthkey(self) -> bool:
+        """Remove the charm-managed OAuth file without logging its contents."""
+        try:
+            Path(LP_OAUTH_KEY_PATH).unlink(missing_ok=True)
+        except OSError as e:
+            logger.error("Failed to remove Launchpad oauth token: %s", e)
+            return False
+        return True
 
     def configure_archive_mirror(
         self, archive_rsync_source: str, mirror_dir: str, ports_rsync_source: str
@@ -501,14 +508,32 @@ class StaticReports:
             env_file,
         )
 
-    def refresh_report(self):
-        """Refresh all the reports - wait for completion."""
-        try:
-            for service in UBUNTU_STATIC_REPORT_SERVICES:
-                systemd.service_start(service + ".service")
-        except CalledProcessError as e:
-            logger.debug("Refreshing of the tracker failed: %s", e.stdout)
-            raise
+    def _report_is_active(self, unit: str) -> bool:
+        """Return whether a oneshot is active, starting, or changing state."""
+        result = run(
+            ["systemctl", "show", unit, "--property=ActiveState", "--value"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        return result.stdout.strip() in {"active", "activating", "reloading", "deactivating"}
+
+    def run_report(self, service: str, restart: bool = False):
+        """Run one report synchronously, refusing unintended interruption."""
+        if service not in UBUNTU_STATIC_REPORT_SERVICES:
+            raise ValueError(f"Unknown static report service: {service}")
+        unit = f"{service}.service"
+        if restart:
+            logger.info("Explicitly restarting %s", unit)
+            systemd.service_restart(unit, "--wait")
+            return
+        if self._report_is_active(unit):
+            raise ReportAlreadyRunningError(
+                f"{unit} is already running; use restart=true to interrupt it explicitly."
+            )
+        logger.info("Starting %s", unit)
+        systemd.service_start(unit, "--wait")
 
     def setup_systemd_unit(self, service):  # noqa: C901
         """Set up the requested service and timer with proxy configuration."""
@@ -560,7 +585,7 @@ class StaticReports:
             logger.debug("Enabling %s.timer", service)
             try:
                 systemd.service_enable("--now", f"{service}.timer")
-            except CalledProcessError as e:
+            except (CalledProcessError, systemd.SystemdError) as e:
                 logger.error("Failed to enable %s.timer: %s", service, e)
                 raise
         else:

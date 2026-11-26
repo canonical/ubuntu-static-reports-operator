@@ -1,6 +1,7 @@
 # Copyright 2025 Canonical
 # See LICENSE file for licensing details.
 
+import json
 import os
 
 import jubilant
@@ -11,6 +12,7 @@ from . import (
     APPNAME,
     address,
     configure_lp_secret,
+    oneshot_invocation_id,
     requires_archive,
     requires_secret,
     retry,
@@ -35,13 +37,19 @@ def test_service_state_after_deploy(
 
     juju.wait(jubilant.all_active, timeout=1200)
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="update-sync-blocklist.service"
+        juju,
+        unit="ubuntu-static-reports/0",
+        service="update-sync-blocklist.service",
+        timeout_sec=600,
     )
-    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-seeds.service")
+    # update-seeds performs a Launchpad-bound cold clone on its first run and
+    # publishes individual seed files incrementally. The content tests below
+    # wait for the specific seed content they need instead of requiring the
+    # entire background clone to finish.
 
 
 # These have to follow test_service_state_after_deploy so content is ready
-@retry(retry_num=20, retry_sleep_sec=6)
+@retry(retry_num=150, retry_sleep_sec=6)
 def check_content(juju: jubilant.Juju, path, startswith, contains):
     """Check if the response matches the expected content."""
     response = requests.get(f"http://{address(juju)}:80/{path}", timeout=30)
@@ -71,10 +79,13 @@ def test_content_update_seeds(juju: jubilant.Juju):
 
 
 def test_content_package_subscribers(juju: jubilant.Juju):
-    """Check the response of package-subscribers."""
-    wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="package-subscribers.service"
-    )
+    """Check the response of package-subscribers.
+
+    A timer may start another long invocation after the first successful run.
+    The published JSON is the integration contract, so waiting for every
+    overlapping invocation would turn a known Launchpad hang into a two-hour
+    test delay.
+    """
     check_content(
         juju,
         path="package-team-mapping.json",
@@ -101,7 +112,7 @@ def test_sru_report_logs_progress_in_debug_mode(juju: jubilant.Juju):
     try:
         juju.ssh(
             unit,
-            f"sudo systemctl stop sru-report.service; "
+            "sudo systemctl stop sru-report.timer sru-report.service; "
             f"sudo rm -f {report_new}; "
             f"sudo install -d {override_dir} && "
             f"printf '[Service]\\nEnvironment=DEBUG=1\\n' | "
@@ -128,7 +139,8 @@ def test_sru_report_logs_progress_in_debug_mode(juju: jubilant.Juju):
             unit,
             "sudo systemctl stop sru-report.service; "
             f"sudo rm -f {override_dir}/debug.conf {report_new}; "
-            "sudo systemctl daemon-reload",
+            "sudo systemctl daemon-reload; "
+            "sudo systemctl start sru-report.timer",
         )
 
 
@@ -201,6 +213,57 @@ def test_onsuccess_services_are_enabled(juju: jubilant.Juju):
         assert state == "static", f"{service}.service is not static"
 
 
+def test_static_reports_diagnose_matches_cli_and_action(juju: jubilant.Juju):
+    """The installed CLI and Juju action expose the same health document.
+
+    The integration model intentionally points the archive source at an
+    unreachable local address, so an overall critical result is expected. The
+    CLI's non-zero diagnostic exit code must not be mistaken for an SSH
+    command failure.
+    """
+    unit = "ubuntu-static-reports/0"
+    cli_document = json.loads(juju.ssh(unit, "static-reports-diagnose --format json || true"))
+    task = juju.run(unit, "static-reports-diagnose", wait=60)
+    action_document = json.loads(task.results["report"])
+
+    assert cli_document["schema_version"] == action_document["schema_version"] == 1
+    assert cli_document["status"] == action_document["status"] == "critical"
+    assert len(cli_document["reports"]) == len(action_document["reports"]) == 12
+    assert {report["service"] for report in cli_document["reports"]} == {
+        report["service"] for report in action_document["reports"]
+    }
+    assert cli_document["serving"] is not None
+    assert action_document["serving"] is not None
+
+    selected = juju.run(
+        unit,
+        "static-reports-diagnose",
+        {"service": "update-sync-blocklist"},
+        wait=60,
+    )
+    selected_document = json.loads(selected.results["report"])
+    assert len(selected_document["reports"]) == 1
+    assert selected_document["reports"][0]["service"] == "update-sync-blocklist"
+    assert selected_document["serving"] is None
+
+
+def test_run_report_runs_only_selected_service(juju: jubilant.Juju):
+    """A targeted recovery completes and returns the selected report's health."""
+    task = juju.run(
+        "ubuntu-static-reports/0",
+        "run-report",
+        {"service": "update-sync-blocklist"},
+        wait=600,
+    )
+
+    assert task.results["service"] == "update-sync-blocklist"
+    assert task.results["status"] == "ok"
+    assert task.results["outcome"] == "published"
+    document = json.loads(task.results["report"])
+    assert len(document["reports"]) == 1
+    assert document["reports"][0]["service"] == "update-sync-blocklist"
+
+
 def test_swapfile_is_active_and_persistent(juju: jubilant.Juju):
     """The charm-ensured swap file is active and referenced in /etc/fstab.
 
@@ -256,32 +319,53 @@ def test_content_mismatches(juju: jubilant.Juju):
     juju.wait(jubilant.all_active, timeout=300)
 
     # Seed the germinate inputs, then build the archive-index snapshot.
-    juju.ssh(
-        "ubuntu-static-reports/0",
-        "sudo systemctl start --no-block update-seeds.service",
-    )
-    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-seeds.service")
-
-    juju.ssh(
-        "ubuntu-static-reports/0",
-        "sudo systemctl start --no-block update-archive-mirror.service",
-    )
+    unit = "ubuntu-static-reports/0"
+    baseline = oneshot_invocation_id(juju, unit, "update-seeds.service")
+    juju.ssh(unit, "sudo systemctl restart --no-block update-seeds.service")
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="update-archive-mirror.service"
+        juju,
+        unit=unit,
+        service="update-seeds.service",
+        timeout_sec=7200,
+        baseline_invocation_id=baseline,
+    )
+
+    archive_baseline = oneshot_invocation_id(juju, unit, "update-archive-mirror.service")
+    germinate_baseline = oneshot_invocation_id(juju, unit, "update-germinate.service")
+    mismatches_baseline = oneshot_invocation_id(juju, unit, "update-mismatches.service")
+    indexer_baseline = oneshot_invocation_id(juju, unit, "seeded-in-ubuntu-indexer.service")
+    juju.ssh(unit, "sudo systemctl restart --no-block update-archive-mirror.service")
+    wait_oneshot_finished(
+        juju,
+        unit=unit,
+        service="update-archive-mirror.service",
+        baseline_invocation_id=archive_baseline,
     )
 
     # update-archive-mirror triggers update-germinate via OnSuccess=; wait for it
     # to publish the combined archive+germinate snapshot the mismatch reports read.
-    wait_oneshot_finished(juju, unit="ubuntu-static-reports/0", service="update-germinate.service")
+    wait_oneshot_finished(
+        juju,
+        unit=unit,
+        service="update-germinate.service",
+        timeout_sec=7200,
+        baseline_invocation_id=germinate_baseline,
+    )
 
     # update-germinate triggers update-mismatches via OnSuccess= in turn.
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="update-mismatches.service"
+        juju,
+        unit=unit,
+        service="update-mismatches.service",
+        baseline_invocation_id=mismatches_baseline,
     )
 
     # update-germinate also triggers seeded-in-ubuntu-indexer via OnSuccess=.
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="seeded-in-ubuntu-indexer.service"
+        juju,
+        unit=unit,
+        service="seeded-in-ubuntu-indexer.service",
+        baseline_invocation_id=indexer_baseline,
     )
 
     # /germinate/ is a symlink the charm maintains to update-germinate's `current`

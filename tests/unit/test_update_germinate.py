@@ -106,6 +106,41 @@ def test_views_are_rebuilt_idempotently(update_germinate, staging):
     assert len(list(flat.iterdir())) == 3
 
 
+def test_unchanged_germinate_records_input_and_output_snapshots(
+    update_germinate, monkeypatch, tmp_path
+):
+    archive = tmp_path / "archive"
+    archive_snapshot = archive / "snapshot.archive"
+    archive_snapshot.mkdir(parents=True)
+    (archive / "current").symlink_to(archive_snapshot.name)
+    out = tmp_path / "germinate"
+    germinate_snapshot = out / "snapshot.germinate"
+    germinate_snapshot.mkdir(parents=True)
+    (germinate_snapshot / "STAMP").write_text(
+        "Archive-snapshot: snapshot.archive\nSeeds-mtime: 10\n"
+    )
+    (out / "current").symlink_to(germinate_snapshot.name)
+    monkeypatch.setattr(update_germinate, "_seeds_mtime", lambda source: 10)
+    outcomes = []
+    monkeypatch.setattr(
+        update_germinate.health,
+        "record_outcome",
+        lambda service, outcome, reason="", **kwargs: outcomes.append((outcome, reason, kwargs)),
+    )
+
+    assert update_germinate.germinate_and_publish(archive, out, "file:///seeds") == 0
+    assert outcomes == [
+        (
+            "unchanged",
+            "No archive or seed changes since the last germinate snapshot.",
+            {
+                "input_snapshot": "snapshot.archive",
+                "output_snapshot": "snapshot.germinate",
+            },
+        )
+    ]
+
+
 def test_hardlink_raises_on_conflicting_dest(update_germinate, staging):
     src = staging / "flavours" / "germinate.output"
     dest = staging / "flat"

@@ -48,6 +48,16 @@ def _tree_file(
     return path
 
 
+def _write_release(staging: Path, series: str, architectures: tuple[str, ...]) -> None:
+    release = staging / "germinate" / "snapshot.20250101T000000Z"
+    release = release / "archive" / "ubuntu" / "dists" / series / "Release"
+    release.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f" deadbeef 1 main/binary-{architecture}/Packages.gz" for architecture in architectures
+    ]
+    release.write_text("\n".join(lines) + "\n")
+
+
 @pytest.fixture
 def staging(tmp_path):
     """Build a germinate snapshot (flavours + flat views) and the seed checkouts."""
@@ -74,6 +84,7 @@ def staging(tmp_path):
     seeds = tmp_path / "seeds"
     for name in ("ubuntu.resolute", "kubuntu.resolute", "i386.resolute", "platform.resolute"):
         (seeds / name).mkdir(parents=True)
+    _write_release(tmp_path, "resolute", ("amd64", "arm64"))
 
     return tmp_path
 
@@ -144,6 +155,105 @@ def test_generate_indexes_writes_gzipped_json_per_series_arch(indexer, staging):
 def test_generate_indexes_records_processed_snapshot(indexer, staging):
     indexer.generate_indexes(_config(indexer, staging))
     assert (staging / ".state").read_text() == "snapshot.20250101T000000Z"
+
+
+def test_generate_indexes_records_written_and_skipped_cells(indexer, staging, monkeypatch):
+    health_dir = staging / "health"
+    monkeypatch.setenv("STATIC_REPORTS_HEALTH_DIR", str(health_dir))
+    monkeypatch.setenv("INVOCATION_ID", "first-run")
+    cfg = _config(indexer, staging)
+    indexer.generate_indexes(cfg)
+
+    record_path = health_dir / "seeded-in-ubuntu-indexer.json"
+    first = json.loads(record_path.read_text())
+    assert first["outcome"] == "published"
+    assert first["input_snapshot"] == "snapshot.20250101T000000Z"
+    assert first["details"]["complete"] is True
+    assert len(first["details"]["written"]) == 2
+    assert first["details"]["skipped"] == [
+        {
+            "series": "resolute",
+            "architecture": "arm64",
+            "flavor": "kubuntu",
+            "reason": "no germinate output",
+            "expected": True,
+        }
+    ]
+
+    monkeypatch.setenv("INVOCATION_ID", "second-run")
+    indexer.generate_indexes(cfg)
+    second = json.loads(record_path.read_text())
+    assert second["outcome"] == "already_processed"
+    assert second["details"] == first["details"]
+    assert second["last_publication_at"] == first["last_publication_at"]
+
+
+def test_expected_archs_are_derived_from_release_metadata(indexer, staging):
+    _write_release(staging, "trusty", ("amd64",))
+    snapshot = staging / "germinate" / "snapshot.20250101T000000Z"
+
+    assert indexer._expected_archs(snapshot, "resolute") == (True, {"amd64", "arm64"})
+    assert indexer._expected_archs(snapshot, "trusty") == (True, {"amd64"})
+    assert indexer._expected_archs(snapshot, "xenial") == (False, set())
+
+
+def test_unsupported_series_does_not_mark_indexes_incomplete(indexer, staging, monkeypatch):
+    (staging / "seeds" / "ubuntu.trusty").mkdir()
+    monkeypatch.setenv("STATIC_REPORTS_HEALTH_DIR", str(staging / "health"))
+
+    indexer.generate_indexes(_config(indexer, staging))
+
+    record = json.loads((staging / "health" / "seeded-in-ubuntu-indexer.json").read_text())
+    assert record["details"]["complete"] is True
+    assert {
+        "series": "trusty",
+        "reason": "unsupported series",
+        "expected": True,
+    } in record["details"]["skipped"]
+
+
+def test_missing_expected_cell_marks_indexes_incomplete(indexer, staging, monkeypatch):
+    monkeypatch.setenv("STATIC_REPORTS_HEALTH_DIR", str(staging / "health"))
+    original_build_index = indexer.build_index
+
+    def missing_arm64(series, arch, seed_source, germinate_dir, skipped=None):
+        if arch == "arm64":
+            return {}
+        return original_build_index(series, arch, seed_source, germinate_dir, skipped)
+
+    monkeypatch.setattr(indexer, "build_index", missing_arm64)
+    indexer.generate_indexes(_config(indexer, staging))
+
+    record = json.loads((staging / "health" / "seeded-in-ubuntu-indexer.json").read_text())
+    assert record["details"]["complete"] is False
+    assert any(
+        skip.get("reason") == "no data" and skip.get("expected") is False
+        for skip in record["details"]["skipped"]
+    )
+
+
+def test_missing_release_metadata_marks_indexes_incomplete(indexer, staging, monkeypatch):
+    (staging / "seeds" / "ubuntu.trusty").mkdir()
+    (
+        staging
+        / "germinate"
+        / "snapshot.20250101T000000Z"
+        / "archive"
+        / "ubuntu"
+        / "dists"
+        / "trusty"
+    ).mkdir(parents=True)
+    monkeypatch.setenv("STATIC_REPORTS_HEALTH_DIR", str(staging / "health"))
+
+    indexer.generate_indexes(_config(indexer, staging))
+
+    record = json.loads((staging / "health" / "seeded-in-ubuntu-indexer.json").read_text())
+    assert record["details"]["complete"] is False
+    assert {
+        "series": "trusty",
+        "reason": "missing Release architecture metadata",
+        "expected": False,
+    } in record["details"]["skipped"]
 
 
 def test_generate_indexes_skips_already_processed_snapshot(indexer, staging):

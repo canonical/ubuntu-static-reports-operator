@@ -56,9 +56,58 @@ charm-libs:
     version: "2"
 
 actions:
-  refresh:
+  static-reports-diagnose:
     description: |
-      Force refreshing the content of the static reports.
+      Read-only diagnosis of local report and nginx health. Without a service
+      parameter, checks every report and local nginx. Returns the same health
+      document as the static-reports-diagnose CLI.
+    params:
+      service:
+        description: Check only this report and its upstream dependency state.
+        type: string
+        enum:
+          - update-bugpatterns
+          - update-sync-blocklist
+          - update-seeds
+          - packageset-report
+          - package-subscribers
+          - permissions-report
+          - sru-report
+          - update-archive-mirror
+          - update-germinate
+          - update-mismatches
+          - update-nbs
+          - seeded-in-ubuntu-indexer
+    additionalProperties: false
+  run-report:
+    description: |
+      Run one static report synchronously. Does not force regeneration when
+      unchanged-input checks apply. By default, refuses to interrupt a running
+      service; restart=true explicitly requests that interruption.
+    params:
+      service:
+        description: The single report service to run.
+        type: string
+        enum:
+          - update-bugpatterns
+          - update-sync-blocklist
+          - update-seeds
+          - packageset-report
+          - package-subscribers
+          - permissions-report
+          - sru-report
+          - update-archive-mirror
+          - update-germinate
+          - update-mismatches
+          - update-nbs
+          - seeded-in-ubuntu-indexer
+      restart:
+        description: Explicitly interrupt and restart the selected service.
+        type: boolean
+        default: false
+    required:
+      - service
+    additionalProperties: false
 
 requires:
   ingress:
@@ -71,7 +120,7 @@ config:
     lpuser_secret_id:
       description: |
         The secret ID for a vault containing the Launchpad oauth token
-        under ky lpoauthkey, to be used for services that need
+        under key lpoauthkey, to be used for services that need
         authenticated users.
       type: secret
     rsync_archive_source:

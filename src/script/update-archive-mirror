@@ -40,6 +40,12 @@ from pathlib import Path, PurePosixPath
 
 import lp_series
 
+try:
+    import staticreports_health as health
+except ModuleNotFoundError:  # Allow direct execution from the source tree.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import staticreports_health as health
+
 logger = logging.getLogger("update-archive-mirror")
 
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
@@ -75,9 +81,7 @@ def _non_negative_float(value: str) -> float:
 
 def parse_args(argv=None) -> argparse.Namespace:
     """Parse command-line options."""
-    parser = argparse.ArgumentParser(
-        description="Publish an atomic archive-indices snapshot."
-    )
+    parser = argparse.ArgumentParser(description="Publish an atomic archive-indices snapshot.")
     parser.add_argument(
         "--force",
         action="store_true",
@@ -91,7 +95,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--archive-rsync-source",
-        default=os.environ.get("RSYNC_ARCHIVE_SOURCE", "rsync://rsync.archive.ubuntu.com/ubuntu/dists/"),
+        default=os.environ.get(
+            "RSYNC_ARCHIVE_SOURCE", "rsync://rsync.archive.ubuntu.com/ubuntu/dists/"
+        ),
         help="rsync source for the archive indices (the dists tree).",
     )
     parser.add_argument(
@@ -222,9 +228,7 @@ def _validate_indices(snapshot_ubuntu: Path, ports_enabled: bool = True) -> int:
     The primary export does not serve ports files, but its Release describes them.
     """
     dists = snapshot_ubuntu / "dists"
-    releases = {
-        release.parent.name: _read_release(release) for release in dists.glob("*/Release")
-    }
+    releases = {release.parent.name: _read_release(release) for release in dists.glob("*/Release")}
     if not releases:
         raise ValueError(f"No Release files found below {dists}")
     patterns = (
@@ -307,7 +311,10 @@ def _merge_ports_into_snapshot(
     ]:
         rel = packages.relative_to(dists)
         suite = rel.parts[0]
-        if suite not in primary or rel.relative_to(suite).as_posix() not in primary[suite].checksums:
+        if (
+            suite not in primary
+            or rel.relative_to(suite).as_posix() not in primary[suite].checksums
+        ):
             continue
         dest = snapshot_ubuntu / "dists" / rel
         if dest.exists():
@@ -474,6 +481,12 @@ def sync_and_publish(
             fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             logger.info("Another update-archive-mirror run is in progress; exiting.")
+            health.record_outcome(
+                "update-archive-mirror",
+                "locked",
+                "Another update-archive-mirror run is in progress.",
+                output_snapshot=health.snapshot_name(out / "current"),
+            )
             return 0
 
         # Announce readiness now that this instance is the active worker.
@@ -523,6 +536,12 @@ def _sync_and_publish_locked(
     rebuild = force or not have_current or not _same_release_inputs(primary, ports, stamp)
     if not rebuild:
         logger.info("No archive changes since last snapshot; nothing to do.")
+        health.record_outcome(
+            "update-archive-mirror",
+            "unchanged",
+            "No archive changes since the last snapshot.",
+            output_snapshot=health.snapshot_name(current),
+        )
         return 0
     try:
         _validate_suite_coverage(primary, ports, bool(ports_rsync_source))
@@ -556,6 +575,12 @@ def _sync_and_publish_locked(
     swap_current(out, snapshot)
     gc_snapshots(out, max(1, retention))
     logger.info("Published archive snapshot %s in %s.", snapshot.name, out)
+    health.record_outcome(
+        "update-archive-mirror",
+        "published",
+        f"Published archive snapshot {snapshot.name}.",
+        output_snapshot=snapshot.name,
+    )
     return 0
 
 

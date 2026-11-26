@@ -27,6 +27,12 @@ from pathlib import Path
 
 import lp_series
 
+try:
+    import staticreports_health as health
+except ModuleNotFoundError:  # Allow direct execution from the source tree.
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import staticreports_health as health
+
 logger = logging.getLogger("update-mismatches")
 
 # The systemd unit runs this as User=ubuntu, so HOME is that account's home
@@ -36,16 +42,12 @@ logger = logging.getLogger("update-mismatches")
 #    elsewhere, so we symlink them at each snapshot instead (see _relink).
 #  - ~/.update-mismatches.lock and ~/.update-mismatches.state: this script's
 #    own per-run lock and last-processed-snapshot marker.
-#  - ~/.config/lp-ubuntu-archive-unprivileged-bot.oauth: the Launchpad
-#    credentials file the charm writes for these tools to authenticate with.
 HOME = Path(os.environ.get("HOME", "/home/ubuntu"))
 
 
 def _env_path(name: str, default: Path) -> Path:
     value = os.environ.get(name)
     return Path(value) if value else default
-
-
 
 
 @dataclass(frozen=True)
@@ -80,19 +82,42 @@ def generate_reports(cfg: Config) -> int:
         fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         logger.info("Another update-mismatches run is in progress; exiting.")
+        health.record_outcome(
+            "update-mismatches",
+            "locked",
+            "Another update-mismatches run is in progress.",
+            input_snapshot=health.snapshot_name(cfg.archive_root),
+        )
         return 0
 
     snapshot = _resolve_snapshot(cfg)
     if snapshot is None:
         logger.info("No archive snapshot published at %s yet; nothing to do.", cfg.archive_root)
+        health.record_outcome(
+            "update-mismatches",
+            "missing_input",
+            f"No archive snapshot is published at {cfg.archive_root}.",
+        )
         return 0
     if not (snapshot / "STAMP").exists():
         logger.warning("Snapshot %s has no STAMP; treating it as incomplete.", snapshot.name)
+        health.record_outcome(
+            "update-mismatches",
+            "missing_input",
+            f"Snapshot {snapshot.name} has no STAMP.",
+            input_snapshot=snapshot.name,
+        )
         return 0
 
     snapshot_id = snapshot.name
     if not cfg.force and snapshot_id == _last_processed(cfg):
         logger.info("Archive snapshot %s already processed; nothing to do.", snapshot_id)
+        health.record_outcome(
+            "update-mismatches",
+            "already_processed",
+            f"Archive snapshot {snapshot_id} was already processed.",
+            input_snapshot=snapshot_id,
+        )
         return 0
 
     logger.info("Processing archive snapshot %s.", snapshot_id)
@@ -121,6 +146,12 @@ def generate_reports(cfg: Config) -> int:
 
     _record_processed(cfg, snapshot_id)
     logger.info("Mismatch reports updated in %s from snapshot %s.", cfg.out, snapshot_id)
+    health.record_outcome(
+        "update-mismatches",
+        "published",
+        f"Mismatch reports updated from snapshot {snapshot_id}.",
+        input_snapshot=snapshot_id,
+    )
     return 0
 
 
@@ -195,10 +226,7 @@ def _tool_env(cfg: Config) -> dict:
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH")
     env["PYTHONPATH"] = f"{cfg.uat}{os.pathsep}{pythonpath}" if pythonpath else str(cfg.uat)
-    env.setdefault(
-        "LP_CREDENTIALS_FILE",
-        str(HOME / ".config/lp-ubuntu-archive-unprivileged-bot.oauth"),
-    )
+    env.pop("LP_CREDENTIALS_FILE", None)
     return env
 
 
@@ -333,7 +361,6 @@ def _report_steps(cfg: Config) -> list:
         ),
     ]
     return steps
-
 
 
 if __name__ == "__main__":
