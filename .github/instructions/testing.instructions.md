@@ -73,7 +73,7 @@ def test_run_report_starts_only_the_selected_service(monkeypatch):
 
     sr.run_report("update-nbs")
 
-    assert starts == [("update-nbs.service",)]
+    assert starts == [("update-nbs.service", "--wait")]
 ```
 
 ### Structure Guidelines
