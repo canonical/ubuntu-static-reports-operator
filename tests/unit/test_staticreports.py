@@ -255,7 +255,7 @@ def test_run_report_starts_only_the_selected_service(monkeypatch):
 
     sr.run_report("update-nbs")
 
-    assert starts == [("update-nbs.service",)]
+    assert starts == [("update-nbs.service", "--wait")]
 
 
 def test_run_report_refuses_to_interrupt_active_service(monkeypatch):
@@ -283,12 +283,14 @@ def test_report_is_active_covers_oneshot_state_changes(monkeypatch, state, expec
 
 def test_run_report_explicitly_restarts_selected_service(monkeypatch):
     restarts = []
-    monkeypatch.setattr(staticreports.systemd, "service_restart", restarts.append)
+    monkeypatch.setattr(
+        staticreports.systemd, "service_restart", lambda *args: restarts.append(args)
+    )
     sr = staticreports.StaticReports()
 
     sr.run_report("sru-report", restart=True)
 
-    assert restarts == ["sru-report.service"]
+    assert restarts == [("sru-report.service", "--wait")]
 
 
 def test_run_report_rejects_unknown_service():

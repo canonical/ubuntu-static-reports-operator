@@ -526,14 +526,14 @@ class StaticReports:
         unit = f"{service}.service"
         if restart:
             logger.info("Explicitly restarting %s", unit)
-            systemd.service_restart(unit)
+            systemd.service_restart(unit, "--wait")
             return
         if self._report_is_active(unit):
             raise ReportAlreadyRunningError(
                 f"{unit} is already running; use restart=true to interrupt it explicitly."
             )
         logger.info("Starting %s", unit)
-        systemd.service_start(unit)
+        systemd.service_start(unit, "--wait")
 
     def setup_systemd_unit(self, service):  # noqa: C901
         """Set up the requested service and timer with proxy configuration."""
