@@ -330,29 +330,42 @@ def test_content_mismatches(juju: jubilant.Juju):
         baseline_invocation_id=baseline,
     )
 
-    baseline = oneshot_invocation_id(juju, unit, "update-archive-mirror.service")
+    archive_baseline = oneshot_invocation_id(juju, unit, "update-archive-mirror.service")
+    germinate_baseline = oneshot_invocation_id(juju, unit, "update-germinate.service")
+    mismatches_baseline = oneshot_invocation_id(juju, unit, "update-mismatches.service")
+    indexer_baseline = oneshot_invocation_id(juju, unit, "seeded-in-ubuntu-indexer.service")
     juju.ssh(unit, "sudo systemctl restart --no-block update-archive-mirror.service")
     wait_oneshot_finished(
         juju,
         unit=unit,
         service="update-archive-mirror.service",
-        baseline_invocation_id=baseline,
+        baseline_invocation_id=archive_baseline,
     )
 
     # update-archive-mirror triggers update-germinate via OnSuccess=; wait for it
     # to publish the combined archive+germinate snapshot the mismatch reports read.
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="update-germinate.service", timeout_sec=7200
+        juju,
+        unit=unit,
+        service="update-germinate.service",
+        timeout_sec=7200,
+        baseline_invocation_id=germinate_baseline,
     )
 
     # update-germinate triggers update-mismatches via OnSuccess= in turn.
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="update-mismatches.service"
+        juju,
+        unit=unit,
+        service="update-mismatches.service",
+        baseline_invocation_id=mismatches_baseline,
     )
 
     # update-germinate also triggers seeded-in-ubuntu-indexer via OnSuccess=.
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="seeded-in-ubuntu-indexer.service"
+        juju,
+        unit=unit,
+        service="seeded-in-ubuntu-indexer.service",
+        baseline_invocation_id=indexer_baseline,
     )
 
     # /germinate/ is a symlink the charm maintains to update-germinate's `current`
