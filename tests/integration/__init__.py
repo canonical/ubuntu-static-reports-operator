@@ -128,21 +128,37 @@ def _oneshot_failure(juju: jubilant.Juju, unit: str, service: str, reason: str) 
     return AssertionError(f"{service}: {reason}\nLatest journal lines:\n{journal}")
 
 
+def oneshot_invocation_id(juju: jubilant.Juju, unit: str, service: str) -> str:
+    """Return the unit's current invocation ID, or an empty string if never run."""
+    output = juju.ssh(
+        unit,
+        f"sudo timeout 20 systemctl show -p InvocationID --value {service}",
+    )
+    return re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[=><])", "", output).strip()
+
+
 def wait_oneshot_finished(
     juju: jubilant.Juju,
     unit: str,
     service: str,
     timeout_sec: int = 1800,
     poll_sec: int = 10,
+    baseline_invocation_id: str | None = None,
 ):
-    """Require one successful oneshot completion within a wall-clock budget."""
+    """Require one successful oneshot completion within a wall-clock budget.
+
+    A nonempty invocation ID proves the unit actually ran. When a baseline
+    invocation ID is supplied, success also requires a different invocation,
+    so waiting cannot be satisfied by a previous run.
+    """
     deadline = time.monotonic() + timeout_sec
     properties = ""
     while True:
         properties = juju.ssh(
             unit,
             "sudo timeout 20 systemctl show "
-            "-p ActiveState -p SubState -p Result -p ExecMainStatus --no-pager " + service,
+            "-p ActiveState -p SubState -p Result -p ExecMainStatus "
+            "-p InvocationID --no-pager " + service,
         )
         clean = re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[=><])", "", properties)
         values = dict(line.split("=", 1) for line in clean.splitlines() if "=" in line)
@@ -150,17 +166,41 @@ def wait_oneshot_finished(
         substate = values.get("SubState", "")
         result = values.get("Result", "")
         status = values.get("ExecMainStatus", "")
+        invocation = values.get("InvocationID", "")
         if active == "failed":
             raise _oneshot_failure(juju, unit, service, "entered failed state")
         if active == "inactive" and substate == "dead":
-            if result == "success" and status == "0":
-                return
-            raise _oneshot_failure(
-                juju,
-                unit,
-                service,
-                f"completed unsuccessfully (Result={result!r}, ExecMainStatus={status!r})",
-            )
+            if result != "success" or status != "0":
+                raise _oneshot_failure(
+                    juju,
+                    unit,
+                    service,
+                    f"completed unsuccessfully (Result={result!r}, ExecMainStatus={status!r})",
+                )
+            if not invocation:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _oneshot_failure(
+                        juju,
+                        unit,
+                        service,
+                        f"did not start within {timeout_sec}s; last properties: {properties!r}",
+                    )
+                time.sleep(min(poll_sec, remaining))
+                continue
+            if baseline_invocation_id is not None and invocation == baseline_invocation_id:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _oneshot_failure(
+                        juju,
+                        unit,
+                        service,
+                        f"did not start a new invocation within {timeout_sec}s; "
+                        f"last properties: {properties!r}",
+                    )
+                time.sleep(min(poll_sec, remaining))
+                continue
+            return
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise _oneshot_failure(

@@ -12,6 +12,7 @@ from . import (
     APPNAME,
     address,
     configure_lp_secret,
+    oneshot_invocation_id,
     requires_archive,
     requires_secret,
     retry,
@@ -318,23 +319,24 @@ def test_content_mismatches(juju: jubilant.Juju):
     juju.wait(jubilant.all_active, timeout=300)
 
     # Seed the germinate inputs, then build the archive-index snapshot.
-    juju.ssh(
-        "ubuntu-static-reports/0",
-        "sudo systemctl start --no-block update-seeds.service",
-    )
+    unit = "ubuntu-static-reports/0"
+    baseline = oneshot_invocation_id(juju, unit, "update-seeds.service")
+    juju.ssh(unit, "sudo systemctl restart --no-block update-seeds.service")
     wait_oneshot_finished(
         juju,
-        unit="ubuntu-static-reports/0",
+        unit=unit,
         service="update-seeds.service",
         timeout_sec=7200,
+        baseline_invocation_id=baseline,
     )
 
-    juju.ssh(
-        "ubuntu-static-reports/0",
-        "sudo systemctl start --no-block update-archive-mirror.service",
-    )
+    baseline = oneshot_invocation_id(juju, unit, "update-archive-mirror.service")
+    juju.ssh(unit, "sudo systemctl restart --no-block update-archive-mirror.service")
     wait_oneshot_finished(
-        juju, unit="ubuntu-static-reports/0", service="update-archive-mirror.service"
+        juju,
+        unit=unit,
+        service="update-archive-mirror.service",
+        baseline_invocation_id=baseline,
     )
 
     # update-archive-mirror triggers update-germinate via OnSuccess=; wait for it
