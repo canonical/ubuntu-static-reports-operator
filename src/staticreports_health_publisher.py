@@ -1,4 +1,4 @@
-"""Publish periodic health snapshots through an atomic current link."""
+"""Publish human-readable health snapshots through an atomic current link."""
 
 import copy
 import json
@@ -12,7 +12,8 @@ from typing import Any
 import staticreports_health as health
 
 DEFAULT_HEALTH_DATA_DIR = health.DEFAULT_WEB_ROOT / "health"
-MAX_HEALTH_HISTORY_BYTES = 5 * 1024 * 1024
+MAX_HEALTH_SNAPSHOT_BYTES = 5 * 1024 * 1024
+STABLE_FILES = ("health.json", "health.txt")
 
 logger = logging.getLogger(__name__)
 
@@ -32,65 +33,18 @@ def _same_health_state(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return _normalized_document(left) == _normalized_document(right)
 
 
-def _read_history(path: Path) -> list[dict[str, Any]]:
-    """Read valid history entries, skipping malformed lines with a warning."""
-    if not path.exists():
-        return []
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError) as error:
-        logger.warning("Could not read health history %s: %s", path, error)
-        return []
-
-    entries: list[dict[str, Any]] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError as error:
-            logger.warning("Skipping malformed health history line: %s", error)
-            continue
-        if not isinstance(entry, dict) or not isinstance(entry.get("document"), dict):
-            logger.warning("Skipping health history line without a document object")
-            continue
-        if not isinstance(entry.get("sample_count"), int):
-            logger.warning("Skipping health history line with an invalid sample count")
-            continue
-        if not isinstance(entry.get("first_seen_at"), str) or not isinstance(
-            entry.get("last_seen_at"), str
-        ):
-            logger.warning("Skipping health history line with invalid interval times")
-            continue
-        entries.append(entry)
-    return entries
-
-
-def _serialize_history(entries: list[dict[str, Any]]) -> str:
-    """Render history entries as compact newline-delimited JSON."""
-    return "".join(
-        json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n" for entry in entries
-    )
-
-
-def _trim_history(entries: list[dict[str, Any]], max_history_bytes: int) -> list[dict[str, Any]]:
-    """Drop oldest entries until the serialized history fits the size budget."""
-    while len(entries) > 1:
-        if len(_serialize_history(entries).encode("utf-8")) <= max_history_bytes:
-            break
-        entries.pop(0)
-    return entries
-
-
-def _history_entry(document: dict[str, Any], generated_at: str) -> dict[str, Any]:
-    """Build the first history entry for a newly observed health state."""
-    return {
-        "schema_version": health.SCHEMA_VERSION,
-        "first_seen_at": generated_at,
-        "last_seen_at": generated_at,
-        "sample_count": 1,
-        "document": copy.deepcopy(document),
-    }
+def _ensure_stable_links(data_dir: Path) -> None:
+    """Keep stable URLs pointing through the atomically switched current link."""
+    for filename in STABLE_FILES:
+        link = data_dir / filename
+        target = Path("current") / filename
+        if link.is_symlink():
+            if link.readlink() == target:
+                continue
+            link.unlink()
+        elif link.exists():
+            raise OSError(f"health stable path {link} is not a symlink")
+        link.symlink_to(target)
 
 
 def _ensure_data_dirs(data_dir: Path) -> Path:
@@ -100,6 +54,7 @@ def _ensure_data_dirs(data_dir: Path) -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(data_dir, 0o755)
     shutil.chown(data_dir, "root", "root")
+    _ensure_stable_links(data_dir)
 
     snapshots_dir = data_dir / "snapshots"
     if snapshots_dir.is_symlink():
@@ -116,13 +71,40 @@ def _write_snapshot_file(path: Path, content: str) -> None:
     os.chmod(path, 0o644)
 
 
-def _previous_snapshot_name(data_dir: Path) -> str | None:
-    """Return the snapshot name currently selected by the health link."""
+def _snapshot_prefix(document: dict[str, Any]) -> str:
+    """Build a readable, time-ordered snapshot directory prefix."""
+    timestamp = health.parse_time(str(document.get("generated_at") or "")) or health.utc_now()
+    return f"snapshot.{timestamp.strftime('%Y%m%dT%H%M%S.%fZ')}."
+
+
+def _current_snapshot(data_dir: Path) -> Path | None:
+    """Return the snapshot directory currently selected by the health link."""
     current = data_dir / "current"
     try:
-        return current.readlink().name
+        target = current.readlink()
     except OSError:
         return None
+    snapshot = data_dir / target
+    try:
+        snapshot = snapshot.resolve(strict=True)
+    except OSError:
+        return None
+    if snapshot.parent != (data_dir / "snapshots").resolve():
+        return None
+    return snapshot
+
+
+def _current_document(data_dir: Path) -> dict[str, Any] | None:
+    """Read the current snapshot document, returning None when unavailable."""
+    snapshot = _current_snapshot(data_dir)
+    if snapshot is None:
+        return None
+    try:
+        document = json.loads((snapshot / "health.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        logger.warning("Could not read the current health snapshot: %s", error)
+        return None
+    return document if isinstance(document, dict) else None
 
 
 def _switch_current(data_dir: Path, snapshot: Path) -> None:
@@ -136,21 +118,42 @@ def _switch_current(data_dir: Path, snapshot: Path) -> None:
         shutil.rmtree(staging, ignore_errors=True)
 
 
-def _cleanup_snapshots(snapshots_dir: Path, keep: set[str]) -> None:
-    """Retain the current and previous snapshots; remove older ones."""
-    try:
-        children = list(snapshots_dir.iterdir())
-    except OSError as error:
-        logger.warning("Could not inspect old health snapshots: %s", error)
-        return
-    for child in children:
-        if child.name in keep or child.is_symlink() or not child.is_dir():
+def _snapshot_size(snapshot: Path) -> int:
+    """Return the byte size of the published files in one snapshot."""
+    total = 0
+    for filename in STABLE_FILES:
+        try:
+            total += (snapshot / filename).stat().st_size
+        except OSError:
             continue
-        shutil.rmtree(child, ignore_errors=True)
+    return total
 
 
-def _remove_incomplete_snapshot(snapshot: Path) -> None:
-    """Remove a staged snapshot after a failed publication attempt."""
+def _retained_snapshots(snapshots_dir: Path) -> list[Path]:
+    """Return snapshot directories in creation order."""
+    snapshots = [
+        child
+        for child in snapshots_dir.iterdir()
+        if child.name.startswith("snapshot.") and child.is_dir() and not child.is_symlink()
+    ]
+    return sorted(snapshots, key=lambda path: (path.stat().st_mtime_ns, path.name))
+
+
+def _trim_snapshots(snapshots_dir: Path, current_name: str, max_bytes: int) -> None:
+    """Drop the oldest snapshots until the retained files fit the size budget."""
+    snapshots = _retained_snapshots(snapshots_dir)
+    total = sum(_snapshot_size(snapshot) for snapshot in snapshots)
+    for snapshot in snapshots:
+        if total <= max_bytes:
+            break
+        if snapshot.name == current_name:
+            continue
+        total -= _snapshot_size(snapshot)
+        shutil.rmtree(snapshot, ignore_errors=True)
+
+
+def _remove_snapshot(snapshot: Path) -> None:
+    """Remove a snapshot after a failed publication attempt."""
     shutil.rmtree(snapshot, ignore_errors=True)
 
 
@@ -158,48 +161,49 @@ def publish_health_document(
     document: dict[str, Any],
     *,
     data_dir: Path | None = None,
-    max_history_bytes: int = MAX_HEALTH_HISTORY_BYTES,
+    max_snapshot_bytes: int = MAX_HEALTH_SNAPSHOT_BYTES,
 ) -> bool:
-    """Publish a complete health snapshot and bounded state history.
+    """Publish a complete human-readable health snapshot.
 
-    A new root-only snapshot is prepared in full before one atomic symlink
-    switch makes its files visible together. A failed publication leaves the
-    previous complete snapshot selected.
+    A changed semantic state creates a new snapshot directory. An unchanged
+    state atomically replaces the current snapshot with the latest document
+    instead of retaining another duplicate. The newest complete snapshot is
+    always kept; older snapshots are removed only when the size budget is
+    exceeded.
     """
     directory = data_dir or DEFAULT_HEALTH_DATA_DIR
     snapshot: Path | None = None
+    committed = False
     try:
         snapshots_dir = _ensure_data_dirs(directory)
-        previous_name = _previous_snapshot_name(directory)
-        history_path = directory / "current" / "history.jsonl"
-        entries = _read_history(history_path)
-        generated_at = str(document.get("generated_at") or health.iso_time())
+        previous_snapshot = _current_snapshot(directory)
+        same_state = previous_snapshot is not None and _same_health_state(
+            _current_document(directory) or {}, document
+        )
 
-        if entries and _same_health_state(entries[-1]["document"], document):
-            latest = entries[-1]
-            latest["document"] = copy.deepcopy(document)
-            latest["last_seen_at"] = generated_at
-            latest["sample_count"] = int(latest.get("sample_count", 0)) + 1
-        else:
-            entries.append(_history_entry(document, generated_at))
-
-        entries = _trim_history(entries, max_history_bytes)
-        snapshot = Path(tempfile.mkdtemp(prefix="snapshot.", dir=snapshots_dir))
+        snapshot = Path(tempfile.mkdtemp(prefix=_snapshot_prefix(document), dir=snapshots_dir))
         _write_snapshot_file(
             snapshot / "health.json", json.dumps(document, indent=2, sort_keys=True)
         )
         _write_snapshot_file(snapshot / "health.txt", health.format_text(document) + "\n")
-        _write_snapshot_file(snapshot / "history.jsonl", _serialize_history(entries))
 
         os.chmod(snapshot, 0o755)
         shutil.chown(snapshot, "root", "root")
         snapshot_name = snapshot.name
         _switch_current(directory, snapshot)
         snapshot = None
-        _cleanup_snapshots(snapshots_dir, {snapshot_name, previous_name or ""})
+        committed = True
+
+        if (
+            same_state
+            and previous_snapshot is not None
+            and previous_snapshot != (snapshots_dir / snapshot_name).resolve()
+        ):
+            shutil.rmtree(previous_snapshot, ignore_errors=True)
+        _trim_snapshots(snapshots_dir, snapshot_name, max_snapshot_bytes)
         return True
     except (OSError, LookupError, TypeError, ValueError) as error:
         logger.warning("Could not publish health snapshot: %s", error)
-        if snapshot is not None:
-            _remove_incomplete_snapshot(snapshot)
+        if snapshot is not None and not committed:
+            _remove_snapshot(snapshot)
         return False

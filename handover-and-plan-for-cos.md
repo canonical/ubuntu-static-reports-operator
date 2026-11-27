@@ -7,7 +7,7 @@ The charm now provides one local health implementation used by:
 - `/usr/bin/static-reports-diagnose` for SSH and `juju exec`;
 - the `static-reports-diagnose` Juju action;
 - concise, periodic workload-health summaries in `juju status`;
-- nginx-served current JSON/text snapshots and bounded JSONL history.
+- nginx-served current JSON/text snapshots and bounded snapshot directories.
 
 The shared result is a versioned JSON document containing overall health,
 per-report health and outcomes, timestamps, snapshot lineage, and local nginx
@@ -15,9 +15,10 @@ health. This document is the contract to reuse for Canonical Observability Stack
 (COS) integration. No COS environment, relation, exporter, dashboard, or alert
 rule is required by the current implementation.
 
-The published `/health/` files are a lightweight pre-COS interface. They provide
-a stable current snapshot and a small, size-bounded history, but they are not a
-replacement for COS time-series storage, dashboards, or alerting.
+The published `/health/` snapshots are a lightweight pre-COS interface. They
+provide stable current JSON/text views and a small, size-bounded set of older
+human-readable snapshots, but they are not a replacement for COS time-series
+storage, dashboards, or alerting.
 
 This document is the handover for a later, separately reviewed COS
 implementation. It is not a commitment to deploy COS or to change model

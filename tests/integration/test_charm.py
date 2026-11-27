@@ -247,8 +247,9 @@ def test_static_reports_diagnose_matches_cli_and_action(juju: jubilant.Juju):
     assert selected_document["serving"] is None
 
 
-def test_published_health_files_are_served(juju: jubilant.Juju):
-    """The periodic hook publishes stable machine, text, and history files."""
+def test_published_health_snapshots_are_served(juju: jubilant.Juju):
+    """The periodic hook publishes stable JSON and text snapshot views."""
+    unit = "ubuntu-static-reports/0"
     base_url = f"http://{address(juju)}:80/health"
 
     @retry(retry_num=60, retry_sleep_sec=6)
@@ -259,27 +260,32 @@ def test_published_health_files_are_served(juju: jubilant.Juju):
         )
         return response
 
-    @retry(retry_num=10, retry_sleep_sec=1)
-    def fetch_consistent_set():
-        latest_response = fetch("health.json")
-        text_response = fetch("health.txt")
-        history_response = fetch("history.jsonl")
+    latest_response = fetch("health.json")
+    text_response = fetch("health.txt")
+    snapshots_response = fetch("snapshots/")
 
-        document = json.loads(latest_response.content)
-        history = [json.loads(line) for line in history_response.text.splitlines()]
-        assert history
-        assert history[-1]["document"] == document
-        return document, text_response.text, history
-
-    document, text, history = fetch_consistent_set()
+    document = json.loads(latest_response.content)
     assert document["schema_version"] == 1
     assert document["status"] in {"ok", "warning", "critical", "unknown", "waiting"}
     assert len(document["reports"]) == 12
     assert document["serving"] is not None
-    assert text.startswith("Overall: ")
-    assert history[-1]["document"]["schema_version"] == 1
-    assert history[-1]["document"]["reports"]
-    assert history[-1]["sample_count"] >= 1
+    assert text_response.text.startswith("Overall: ")
+    assert "snapshot." in snapshots_response.text
+
+    history_response = requests.get(f"{base_url}/history.jsonl", timeout=30)
+    assert history_response.status_code == 404
+
+    snapshot_path = juju.ssh(
+        unit,
+        "find /srv/staticreports/www/health/snapshots "
+        "-mindepth 1 -maxdepth 1 -type d -name 'snapshot.*' | head -1",
+    ).strip()
+    assert snapshot_path
+    snapshot_name = os.path.basename(snapshot_path)
+    snapshot_response = fetch(f"snapshots/{snapshot_name}/health.json")
+    snapshot_document = json.loads(snapshot_response.content)
+    assert snapshot_document["schema_version"] == 1
+    assert snapshot_document["reports"]
 
 
 def test_run_report_runs_only_selected_service(juju: jubilant.Juju):
