@@ -247,6 +247,36 @@ def test_static_reports_diagnose_matches_cli_and_action(juju: jubilant.Juju):
     assert selected_document["serving"] is None
 
 
+def test_published_health_files_are_served(juju: jubilant.Juju):
+    """The periodic hook publishes stable machine, text, and history files."""
+    base_url = f"http://{address(juju)}:80/health"
+
+    @retry(retry_num=60, retry_sleep_sec=6)
+    def fetch(path):
+        response = requests.get(f"{base_url}/{path}", timeout=30)
+        assert response.status_code == 200, (
+            f"{path} is not served yet (HTTP {response.status_code})"
+        )
+        return response
+
+    latest_response = fetch("health.json")
+    text_response = fetch("health.txt")
+    history_response = fetch("history.jsonl")
+
+    document = json.loads(latest_response.content)
+    assert document["schema_version"] == 1
+    assert document["status"] in {"ok", "warning", "critical", "unknown", "waiting"}
+    assert len(document["reports"]) == 12
+    assert document["serving"] is not None
+    assert text_response.text.startswith("Overall: ")
+
+    history = [json.loads(line) for line in history_response.text.splitlines()]
+    assert history
+    assert history[-1]["document"]["schema_version"] == 1
+    assert history[-1]["document"]["reports"]
+    assert history[-1]["sample_count"] >= 1
+
+
 def test_run_report_runs_only_selected_service(juju: jubilant.Juju):
     """A targeted recovery completes and returns the selected report's health."""
     task = juju.run(

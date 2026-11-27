@@ -17,6 +17,7 @@ from charms.operator_libs_linux.v1.systemd import SystemdError
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer as IngressRequirer
 
 import staticreports_health as health
+import staticreports_health_publisher as health_publisher
 from staticreports import ReportAlreadyRunningError, StaticReports
 
 logger = logging.getLogger(__name__)
@@ -257,6 +258,7 @@ class UbuntuStaticReportsCharm(ops.CharmBase):
                 "serving": None,
             }
         self._record_health_document(document)
+        health_publisher.publish_health_document(document)
 
     def _record_health_document(self, document: dict):
         """Publish matching non-OK samples twice, but clear them on the first OK."""

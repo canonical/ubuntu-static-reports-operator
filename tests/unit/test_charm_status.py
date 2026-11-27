@@ -21,6 +21,13 @@ def ctx():
     return Context(UbuntuStaticReportsCharm)
 
 
+@pytest.fixture(autouse=True)
+def publish_health_document():
+    """Keep status tests from writing health files to the host."""
+    with patch("charm.health_publisher.publish_health_document") as mock:
+        yield mock
+
+
 def _document(status):
     return {
         "schema_version": 1,
@@ -115,6 +122,51 @@ def test_update_status_works_with_juju4(collector_class):
     state = ctx.run(ctx.on.update_status(), state)
 
     assert state.unit_status == ActiveStatus()
+
+
+@patch("charm.health.HealthCollector")
+def test_update_status_publishes_the_collected_health_document(
+    collector_class, publish_health_document, ctx
+):
+    document = _document("ok")
+    collector_class.return_value.collect.return_value = document
+    state = State(leader=True)
+
+    state = ctx.run(ctx.on.update_status(), state)
+
+    publish_health_document.assert_called_once_with(document)
+    assert state.unit_status == ActiveStatus()
+
+
+@patch("charm.health.HealthCollector")
+def test_update_status_survives_health_publication_failure(
+    collector_class, publish_health_document, ctx
+):
+    publish_health_document.return_value = False
+    collector_class.return_value.collect.return_value = _document("ok")
+    state = State(leader=True)
+
+    state = ctx.run(ctx.on.update_status(), state)
+
+    publish_health_document.assert_called_once()
+    assert state.unit_status == ActiveStatus()
+
+
+@patch("charm.health.HealthCollector")
+def test_update_status_publishes_unknown_collection_failure_document(
+    collector_class, publish_health_document, ctx
+):
+    collector_class.return_value.collect.side_effect = health.HealthCollectionError(
+        "systemctl unavailable"
+    )
+    state = State(leader=True)
+
+    state = ctx.run(ctx.on.update_status(), state)
+
+    publish_health_document.assert_called_once()
+    published_document = publish_health_document.call_args.args[0]
+    assert published_document["status"] == "unknown"
+    assert "systemctl unavailable" in published_document["summary"]
 
 
 @patch("charm.health.HealthCollector")
