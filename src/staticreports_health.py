@@ -861,6 +861,25 @@ class HealthCollector:
         }
 
 
+def format_text(document: dict[str, Any]) -> str:
+    """Render a concise human view of the shared health document."""
+    lines = [f"Overall: {document['status'].upper()} - {document['summary']}"]
+    if serving := document.get("serving"):
+        lines.append(f"Local nginx: {serving['status'].upper()} - {serving['reason']}")
+    for report in document["reports"]:
+        lines.append(
+            f"{report['service']}: {report['status'].upper()} "
+            f"({report['outcome']}) - {report['reason']}"
+        )
+        if last_success := report.get("last_success_at"):
+            lines.append(f"  Last successful check: {last_success}")
+        if publication := report.get("last_publication_at"):
+            lines.append(f"  Last publication: {publication}")
+        if "lineage_current" in report:
+            lines.append(f"  Lineage current: {str(report['lineage_current']).lower()}")
+    return "\n".join(lines)
+
+
 def exit_code(document: dict[str, Any]) -> int:
     """Map a health document to its documented process exit code."""
     return {"ok": 0, "waiting": 1, "warning": 1, "critical": 2, "unknown": 3}[document["status"]]

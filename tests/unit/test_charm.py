@@ -297,6 +297,18 @@ def test_diagnose_action_returns_shared_document_for_all_services(
     assert out.unit_status == base_state.unit_status
 
 
+@patch("charm.health_publisher.publish_health_document")
+@patch("charm.health.HealthCollector")
+def test_diagnose_action_does_not_publish_health_files(
+    collector_class, publisher_mock, ctx, base_state
+):
+    collector_class.return_value.collect.return_value = _diagnostic_document()
+
+    ctx.run(ctx.on.action("static-reports-diagnose"), base_state)
+
+    publisher_mock.assert_not_called()
+
+
 @patch("charm.health.HealthCollector")
 def test_diagnose_action_uses_configured_mirror_directory(collector_class, ctx):
     collector_class.return_value.collect.return_value = _diagnostic_document()
