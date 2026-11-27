@@ -205,6 +205,12 @@ juju run ubuntu-static-reports/0 static-reports-diagnose service=update-nbs
 that action. See [Automatic health in `juju status`](docs/operations.md#automatic-health-in-juju-status)
 for the two-sample anti-flapping behavior and Juju 3.6/4 compatibility.
 
+The periodic hook also publishes the latest JSON and text snapshots, plus a
+bounded JSONL history, at `/health/health.json`, `/health/health.txt`, and
+`/health/history.jsonl`. See
+[Published health files](docs/operations.md#published-health-files) for the
+deduplication and 5 MiB retention rules.
+
 The underlying services and timers can also be inspected directly with
 `systemctl` and `journalctl`.
 

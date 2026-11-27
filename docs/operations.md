@@ -66,6 +66,54 @@ unhealthy result is a completed diagnostic action, not an action failure.
 Invalid parameters or an inability to collect evidence fail the action. The
 action is read-only and does not start, stop, restart, or regenerate reports.
 
+Juju renders action results as YAML. The nested `report` value is still the
+versioned JSON document; parse that string with a JSON parser to consume the
+same document produced by `static-reports-diagnose --format json`.
+
+## Published health files
+
+Every `update-status` hook publishes the latest health snapshot under the
+nginx web root. The Juju action and installed CLI remain read-only and do not
+change these files.
+
+The stable URLs are:
+
+```text
+/health/health.json
+/health/health.txt
+/health/history.jsonl
+```
+
+`health.json` contains the current versioned JSON document. `health.txt`
+contains the same human-readable rendering as the CLI's default output.
+`history.jsonl` contains newline-delimited JSON intervals for recent state
+changes.
+
+Each history line has the following shape:
+
+```json
+{
+  "schema_version": 1,
+  "first_seen_at": "2026-11-26T14:00:00+00:00",
+  "last_seen_at": "2026-11-26T14:25:00+00:00",
+  "sample_count": 6,
+  "document": {}
+}
+```
+
+`document` is the full health document from the most recent sample in that
+interval, including all report entries and the local nginx result.
+
+History deduplication compares the document while ignoring `generated_at` and
+per-report `running_seconds`. An unchanged semantic state updates the newest
+interval's document, `last_seen_at`, and `sample_count` instead of appending a
+duplicate line. A changed state appends a new interval.
+
+The history file is capped at 5 MiB. When the cap is exceeded, the oldest
+intervals are removed first; the newest interval is always retained. There is
+no fixed time-based retention. This lightweight history is a temporary
+pre-COS interface and does not replace time-series storage or alerting.
+
 ## Automatic health in `juju status`
 
 The charm also handles Juju's periodic `update-status` event. Juju normally emits
@@ -195,8 +243,8 @@ health status, outcome, reason, and applicable attempt, success, publication,
 runtime, and lineage fields. Consumers must tolerate additive fields within the
 same schema version.
 
-The document is shared by the CLI and the Juju diagnostic action. It is also the
-intended input to the cached exporter described in
+The document is shared by the CLI, the Juju diagnostic action, and the published
+health files. It is also the intended input to the cached exporter described in
 [the COS integration handover](../handover-and-plan-for-cos.md).
 
 ## Follow-up commands
