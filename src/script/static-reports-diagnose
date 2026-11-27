@@ -45,25 +45,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def format_text(document: dict) -> str:
-    """Render a concise human view of the shared health document."""
-    lines = [f"Overall: {document['status'].upper()} - {document['summary']}"]
-    if serving := document.get("serving"):
-        lines.append(f"Local nginx: {serving['status'].upper()} - {serving['reason']}")
-    for report in document["reports"]:
-        lines.append(
-            f"{report['service']}: {report['status'].upper()} "
-            f"({report['outcome']}) - {report['reason']}"
-        )
-        if last_success := report.get("last_success_at"):
-            lines.append(f"  Last successful check: {last_success}")
-        if publication := report.get("last_publication_at"):
-            lines.append(f"  Last publication: {publication}")
-        if "lineage_current" in report:
-            lines.append(f"  Lineage current: {str(report['lineage_current']).lower()}")
-    return "\n".join(lines)
-
-
 def main(argv=None, collector=None) -> int:
     """Run diagnostics and return the documented process exit code."""
     args = parse_args(argv)
@@ -81,7 +62,7 @@ def main(argv=None, collector=None) -> int:
     if args.format == "json":
         print(json.dumps(document, indent=2, sort_keys=True))
     else:
-        print(format_text(document))
+        print(health.format_text(document))
     return health.exit_code(document)
 
 
