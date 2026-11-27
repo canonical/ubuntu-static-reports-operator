@@ -51,7 +51,6 @@ SRV_DIRS = [
     (Path("/srv/staticreports/www/mismatches"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/nbs"), "ubuntu", "ubuntu"),
     (Path("/srv/staticreports/www/seeded-in-ubuntu"), "ubuntu", "ubuntu"),
-    (Path("/srv/staticreports/www/health"), "ubuntu", "ubuntu"),
     (Path("/var/lib/staticreports/health"), "ubuntu", "ubuntu"),
     (Path("/usr/local/src"), None, None),
 ]

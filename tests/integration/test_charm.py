@@ -259,19 +259,24 @@ def test_published_health_files_are_served(juju: jubilant.Juju):
         )
         return response
 
-    latest_response = fetch("health.json")
-    text_response = fetch("health.txt")
-    history_response = fetch("history.jsonl")
+    @retry(retry_num=10, retry_sleep_sec=1)
+    def fetch_consistent_set():
+        latest_response = fetch("health.json")
+        text_response = fetch("health.txt")
+        history_response = fetch("history.jsonl")
 
-    document = json.loads(latest_response.content)
+        document = json.loads(latest_response.content)
+        history = [json.loads(line) for line in history_response.text.splitlines()]
+        assert history
+        assert history[-1]["document"] == document
+        return document, text_response.text, history
+
+    document, text, history = fetch_consistent_set()
     assert document["schema_version"] == 1
     assert document["status"] in {"ok", "warning", "critical", "unknown", "waiting"}
     assert len(document["reports"]) == 12
     assert document["serving"] is not None
-    assert text_response.text.startswith("Overall: ")
-
-    history = [json.loads(line) for line in history_response.text.splitlines()]
-    assert history
+    assert text.startswith("Overall: ")
     assert history[-1]["document"]["schema_version"] == 1
     assert history[-1]["document"]["reports"]
     assert history[-1]["sample_count"] >= 1

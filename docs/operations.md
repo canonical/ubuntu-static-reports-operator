@@ -72,9 +72,8 @@ same document produced by `static-reports-diagnose --format json`.
 
 ## Published health files
 
-Every `update-status` hook publishes the latest health snapshot under the
-nginx web root. The Juju action and installed CLI remain read-only and do not
-change these files.
+Every `update-status` hook publishes the latest health snapshot. The Juju
+action and installed CLI remain read-only and do not change these files.
 
 The stable URLs are:
 
@@ -88,6 +87,11 @@ The stable URLs are:
 contains the same human-readable rendering as the CLI's default output.
 `history.jsonl` contains newline-delimited JSON intervals for recent state
 changes.
+
+The three files are prepared together in a root-owned snapshot directory under
+`/srv/staticreports/health`. Nginx serves them through the snapshot selected by
+the `current` link. A failed publication leaves the previous complete snapshot
+selected, so consumers do not see a partially updated set.
 
 Each history line has the following shape:
 
