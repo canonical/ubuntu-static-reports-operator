@@ -51,6 +51,11 @@ def no_chown(monkeypatch):
     monkeypatch.setattr(publisher.shutil, "chown", lambda path, user, group: None)
 
 
+def test_default_health_data_dir_is_inside_the_web_root():
+    assert publisher.DEFAULT_HEALTH_DATA_DIR == health.DEFAULT_WEB_ROOT / "health"
+    assert str(publisher.DEFAULT_HEALTH_DATA_DIR) == "/srv/staticreports/www/health"
+
+
 def test_first_publication_writes_one_complete_snapshot(tmp_path):
     document = _document()
 

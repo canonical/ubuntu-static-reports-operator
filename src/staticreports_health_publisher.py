@@ -11,7 +11,7 @@ from typing import Any
 
 import staticreports_health as health
 
-DEFAULT_HEALTH_DATA_DIR = Path("/srv/staticreports/health")
+DEFAULT_HEALTH_DATA_DIR = health.DEFAULT_WEB_ROOT / "health"
 MAX_HEALTH_HISTORY_BYTES = 5 * 1024 * 1024
 
 logger = logging.getLogger(__name__)

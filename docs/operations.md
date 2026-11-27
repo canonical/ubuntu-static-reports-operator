@@ -89,9 +89,9 @@ contains the same human-readable rendering as the CLI's default output.
 changes.
 
 The three files are prepared together in a root-owned snapshot directory under
-`/srv/staticreports/health`. Nginx serves them through the snapshot selected by
-the `current` link. A failed publication leaves the previous complete snapshot
-selected, so consumers do not see a partially updated set.
+`/srv/staticreports/www/health`. Nginx serves them through the snapshot
+selected by the `current` link. A failed publication leaves the previous
+complete snapshot selected, so consumers do not see a partially updated set.
 
 Each history line has the following shape:
 
