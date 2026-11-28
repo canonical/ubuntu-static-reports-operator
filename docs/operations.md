@@ -70,53 +70,44 @@ Juju renders action results as YAML. The nested `report` value is still the
 versioned JSON document; parse that string with a JSON parser to consume the
 same document produced by `static-reports-diagnose --format json`.
 
-## Published health files
+## Published health snapshots
 
 Every `update-status` hook publishes the latest health snapshot. The Juju
 action and installed CLI remain read-only and do not change these files.
 
-The stable URLs are:
+The stable URLs for the current snapshot are:
 
 ```text
 /health/health.json
 /health/health.txt
-/health/history.jsonl
 ```
 
 `health.json` contains the current versioned JSON document. `health.txt`
 contains the same human-readable rendering as the CLI's default output.
-`history.jsonl` contains newline-delimited JSON intervals for recent state
-changes.
 
-The three files are prepared together in a root-owned snapshot directory under
-`/srv/staticreports/health`. Nginx serves them through the snapshot selected by
-the `current` link. A failed publication leaves the previous complete snapshot
-selected, so consumers do not see a partially updated set.
+Older state changes remain browsable as complete snapshot directories:
 
-Each history line has the following shape:
-
-```json
-{
-  "schema_version": 1,
-  "first_seen_at": "2026-11-26T14:00:00+00:00",
-  "last_seen_at": "2026-11-26T14:25:00+00:00",
-  "sample_count": 6,
-  "document": {}
-}
+```text
+/health/snapshots/<snapshot>/health.json
+/health/snapshots/<snapshot>/health.txt
 ```
 
-`document` is the full health document from the most recent sample in that
-interval, including all report entries and the local nginx result.
+Each snapshot is prepared in full in a root-owned directory under
+`/srv/staticreports/www/health/snapshots`. One atomic `current` link switch
+makes its JSON and text files visible together. A failed publication leaves
+the previous complete snapshot selected, so consumers do not see a partially
+updated set.
 
-History deduplication compares the document while ignoring `generated_at` and
-per-report `running_seconds`. An unchanged semantic state updates the newest
-interval's document, `last_seen_at`, and `sample_count` instead of appending a
-duplicate line. A changed state appends a new interval.
+Snapshot deduplication compares the full document while ignoring `generated_at`
+and per-report `running_seconds`. An unchanged semantic state replaces the
+current snapshot with the latest sample instead of retaining another duplicate.
+A changed state creates a new snapshot directory.
 
-The history file is capped at 5 MiB. When the cap is exceeded, the oldest
-intervals are removed first; the newest interval is always retained. There is
-no fixed time-based retention. This lightweight history is a temporary
-pre-COS interface and does not replace time-series storage or alerting.
+The retained snapshot files are capped at 5 MiB in total. When the cap is
+exceeded, the oldest snapshots are removed first; the newest complete snapshot
+is always retained. There is no fixed time-based retention. These human-readable
+snapshots are a lightweight pre-COS interface and do not replace time-series
+storage or alerting.
 
 ## Automatic health in `juju status`
 
